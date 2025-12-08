@@ -35,7 +35,7 @@ Coming soon – agent answering questions using company documents.
 
 🧭 Learning Roadmap (current stage)
 
- AI fundamentals
+ AI fundamentals *
 
  SQL basics
 
