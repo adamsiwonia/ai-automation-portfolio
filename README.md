@@ -39,7 +39,7 @@ Coming soon – agent answering questions using company documents.
 
  SQL basics
 
- Python for analysis
+ Python for analysis *
 
  Make.com automations
 
