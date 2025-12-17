@@ -57,6 +57,5 @@ Building practical projects to help businesses automate tasks and work more effi
 📬 Contact
 
 If you want to connect:
-GitHub: this profile
-LinkedIn (soon)
+LinkedIn www.linkedin.com/in/adam-siwonia-059bb03a0)
 Email: adam.pawel.siwonia@gmail.com
