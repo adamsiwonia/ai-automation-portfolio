@@ -1,0 +1,6 @@
+Hello {name},
+
+This is a test email from the automation project.
+
+Best regards,
+Adam
