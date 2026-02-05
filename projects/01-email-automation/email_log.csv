@@ -1,0 +1,2 @@
+timestamp_utc,email,status,error_message
+2026-02-05T17:19:33+00:00,test@example.com,DRY_RUN_OK,
