@@ -1,6 +1,8 @@
+Subject: Test Email Automation
+
 Hello {name},
 
-This is a test email from the automation project.
+This is an automated test email sent as part of an email automation project.
 
 Best regards,
 Adam
