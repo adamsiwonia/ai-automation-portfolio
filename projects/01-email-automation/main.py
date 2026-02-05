@@ -1,6 +1,6 @@
-# Email Automation Project
-# Entry point
 from __future__ import annotations
+
+from dotenv import load_dotenv
 
 import csv
 import re
@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import os
+import smtplib
+from email.message import EmailMessage as PyEmailMessage
 
 PROJECT_DIR = Path(__file__).resolve().parent
 RECIPIENTS_PATH = PROJECT_DIR / "recipients.csv"
@@ -96,31 +99,92 @@ def append_log(path: Path, *, email: str, status: str, error_message: str = "") 
         writer = csv.writer(f)
         writer.writerow([ts, email, status, error_message])
 
+def load_smtp_config() -> dict[str, str]:
+    # Loads .env from the project directory
+    load_dotenv(PROJECT_DIR / ".env")
+
+    cfg = {
+        "host": os.getenv("SMTP_HOST", "").strip(),
+        "port": os.getenv("SMTP_PORT", "").strip(),
+        "user": os.getenv("SMTP_USER", "").strip(),
+        "pass": os.getenv("SMTP_PASS", "").strip(),
+        "from_email": os.getenv("FROM_EMAIL", "").strip(),
+        "from_name": os.getenv("FROM_NAME", "").strip(),
+    }
+    missing = [k for k, v in cfg.items() if not v]
+    if missing:
+        raise ValueError(f"Missing SMTP config values in .env: {missing}")
+    return cfg
+
+
+def send_via_smtp(msg: EmailMessage, *, smtp_cfg: dict[str, str]) -> None:
+    email_obj = PyEmailMessage()
+    email_obj["From"] = f'{smtp_cfg["from_name"]} <{smtp_cfg["from_email"]}>'
+    email_obj["To"] = msg.to_email
+    email_obj["Subject"] = msg.subject
+    email_obj.set_content(msg.body)
+
+    host = smtp_cfg["host"]
+    port = int(smtp_cfg["port"])
+    user = smtp_cfg["user"]
+    password = smtp_cfg["pass"]
+
+    # Mailtrap supports STARTTLS on many ports; we’ll use it when available.
+    with smtplib.SMTP(host, port, timeout=20) as server:
+        server.ehlo()
+        try:
+            server.starttls()
+            server.ehlo()
+        except smtplib.SMTPException:
+            # If STARTTLS isn't supported on that port, continue without it.
+            pass
+
+        server.login(user, password)
+        server.send_message(email_obj)
 
 def main() -> None:
-    # DRY RUN: does not send emails yet — just generates a preview + logs.
     recipients = load_recipients(RECIPIENTS_PATH)
     subject_tmpl, body_tmpl = load_template(TEMPLATE_PATH)
 
-    print(f"Loaded recipients: {len(recipients)}")
-    print("Mode: DRY RUN (no emails will be sent)\n")
+    # Load .env BEFORE reading MODE
+    load_dotenv(PROJECT_DIR / ".env")
 
-    for r in recipients:
+    # Mode: DRY_RUN (default) or SEND
+    mode = os.getenv("MODE", "DRY_RUN").strip().upper()
+    ...
+
+    # Mode: DRY_RUN (default) or SEND
+    mode = os.getenv("MODE", "DRY_RUN").strip().upper()
+    if mode not in {"DRY_RUN", "SEND"}:
+        raise ValueError("MODE must be DRY_RUN or SEND")
+
+    smtp_cfg = None
+    if mode == "SEND":
+        smtp_cfg = load_smtp_config()
+
+    print(f"Loaded recipients: {len(recipients)}")
+    print(f"Mode: {mode}\n")
+
+    for idx, r in enumerate(recipients, start=1):
         try:
             msg = render_message(subject_tmpl, body_tmpl, name=r["name"], email=r["email"])
 
-            # Preview to console (first recipient fully, others minimal)
+            # Console preview (always)
             print("----- EMAIL PREVIEW -----")
             print(f"To: {msg.to_email} ({msg.to_name})")
             print(f"Subject: {msg.subject}\n")
             print(msg.body)
             print("-------------------------\n")
 
-            append_log(LOG_PATH, email=msg.to_email, status="DRY_RUN_OK")
+            if mode == "SEND":
+                assert smtp_cfg is not None
+                send_via_smtp(msg, smtp_cfg=smtp_cfg)
+                append_log(LOG_PATH, email=msg.to_email, status="SENT_OK")
+            else:
+                append_log(LOG_PATH, email=msg.to_email, status="DRY_RUN_OK")
+
         except Exception as e:
-            append_log(LOG_PATH, email=r.get("email", ""), status="DRY_RUN_ERROR", error_message=str(e))
-            print(f"[ERROR] Failed to render for {r.get('email','')}: {e}")
-
-
+            append_log(LOG_PATH, email=r.get("email", ""), status=f"{mode}_ERROR", error_message=str(e))
+            print(f"[ERROR] Failed for {r.get('email','')}: {e}")
 if __name__ == "__main__":
     main()
