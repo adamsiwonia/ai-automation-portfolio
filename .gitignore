@@ -1,0 +1,13 @@
+# --- datasets ---
+projects/02-sql-dashboard/data/olist/
+
+# --- env files ---
+.env
+**/.env
+
+# --- python ---
+__pycache__/
+.ipynb_checkpoints/
+
+# --- os ---
+.DS_Store

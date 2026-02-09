@@ -1,13 +1,22 @@
-# Overview
+## Overview
 
-# Dataset
+## Dataset
 
-# Data Model
+This project uses the **Brazilian E-Commerce Public Dataset by Olist**.
 
-# Key SQL Queries
+### Download instructions:
+1. Go to Kaggle:
+   https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+2. Download the dataset (ZIP).
+3. Extract CSV files into the following directory:
 
-# Dashboard
 
-# Insights
+## Data Model
 
-# How to run
+## Key SQL Queries
+
+## Dashboard
+
+## Insights
+
+## How to run
