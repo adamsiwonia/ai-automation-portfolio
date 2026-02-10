@@ -53,6 +53,14 @@ Primary keys, foreign keys, and indexes are used to ensure data integrity and qu
 
 ---
 
+## Sample Analytical Output
+
+**Top 10 revenue days (from `v_daily_revenue`)**
+
+![Daily revenue top 10](images/v_daily_revenue_top10.png)
+
+---
+
 ## Key SQL Views
 
 All analytical views are defined in: `sql/views.sql`
