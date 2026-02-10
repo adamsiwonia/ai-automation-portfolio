@@ -49,6 +49,8 @@ It includes the following core tables:
 
 Primary keys, foreign keys, and indexes are used to ensure data integrity and query performance.
 
+![Schema overview](images/schema_overview.png)
+
 ---
 
 ## Key SQL Views
