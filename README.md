@@ -43,9 +43,30 @@ An automated email processing system built with Python.
 
 ---
 
-### 02. SQL Sales Dashboard *(coming soon)*
-Sales analysis project based on SQL queries and visual dashboards.  
-Planned focus on KPIs, trends, and business insights.
+### 🔹 02. SQL Sales Dashboard
+**Folder:** `projects/02-sql-dashboard`
+
+A **SQL-based analytical backend** built on the Brazilian E-Commerce Public Dataset by Olist.
+
+The project transforms raw transactional data into an **analytics-ready PostgreSQL database** and provides a **semantic layer (SQL views)** to support business KPIs.
+
+**What it includes:**
+- Relational database schema with PK/FK and indexes
+- Analytical SQL views for revenue analysis
+- Executive KPI queries
+- ERD diagram and sample analytical outputs
+
+**Key outputs:**
+- Daily and monthly revenue trends
+- Average Order Value (AOV)
+- Top revenue days
+- KPI-ready SQL for BI tools
+
+**Key skills demonstrated:**
+- SQL (joins, aggregations, views)
+- Data modeling & schema design
+- Business-oriented analytics
+- Dashboard-ready data preparation
 
 ---
 
