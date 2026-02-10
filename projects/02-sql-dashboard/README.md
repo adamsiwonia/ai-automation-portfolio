@@ -2,14 +2,23 @@
 
 This project is a **SQL-based analytical backend** built on the Brazilian E-Commerce Public Dataset by Olist.
 
-The goal of the project is to transform raw CSV files into a **clean, analytics-ready PostgreSQL database**, and to build a **semantic layer (SQL views)** that supports business KPIs such as revenue, number of orders, and average order value (AOV).
+The goal is to transform raw transactional data into an **analytics-ready PostgreSQL database** and to build a **semantic layer (SQL views)** that supports executive-level business KPIs such as revenue trends, order volume, and average order value (AOV).
 
-The project focuses on **real-world data work**, including:
+The project reflects **real-world data work**, including:
 - importing large CSV datasets into PostgreSQL
 - handling foreign keys and data integrity
 - resolving encoding issues on Windows
 - dealing with duplicate primary keys in production data
-- building reusable SQL views for analytics and dashboards
+- building reusable SQL views for analytics and BI dashboards
+
+---
+
+## Business Questions Answered
+
+- How does revenue evolve over time (daily and monthly)?
+- What are the highest revenue days?
+- What is the average order value (AOV) and how is it distributed?
+- What time range does the dataset cover?
 
 ---
 
@@ -17,19 +26,16 @@ The project focuses on **real-world data work**, including:
 
 This project uses the **Brazilian E-Commerce Public Dataset by Olist**.
 
-### Download instructions
-1. Go to Kaggle:  
-   https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
-2. Download the dataset (ZIP).
-3. Extract all CSV files into the directory: projects/02-sql-dashboard/data_olist/
+Source:  
+https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 
-> Raw CSV files are excluded from version control (`.gitignore`).
+Raw CSV files are excluded from version control (`.gitignore`).
 
 ---
 
 ## Data Model
 
-The database schema is defined in: sql/schema.sql
+The database schema is defined in: `sql/schema.sql`
 
 It includes the following core tables:
 - customers
@@ -45,28 +51,46 @@ Primary keys, foreign keys, and indexes are used to ensure data integrity and qu
 
 ---
 
-## Key SQL Queries
+## Key SQL Views
 
-### Analytical View: `v_order_revenue`
+All analytical views are defined in: `sql/views.sql`
 
-The core analytical view created in this project is: v_order_revenue
-
-This view aggregates data at the **order level** and provides:
+### `v_order_revenue`
+Aggregates data at the **order level**:
 - order date
 - total revenue per order (item price + freight value)
 - number of items per order
 
-The view serves as the foundation for all KPI calculations.
+Serves as a foundation for KPI calculations.
 
-The SQL definition is stored in: sql/views.sql
+### `v_daily_revenue`
+Daily aggregation providing:
+- total revenue
+- number of orders
+- average order value (AOV)
+
+### `v_monthly_revenue`
+Monthly revenue trend:
+- revenue
+- order count
+- AOV
 
 ---
 
-## Dashboard
+## KPI Queries
+
+Executive KPI queries are defined in: `sql/kpi_queries.sql`, including:
+- revenue trend range (min/max date, total days)
+- top 10 revenue days
+- AOV distribution (P50 / P90)
+
+---
+
+## Dashboard Usage
 
 This project is designed as a **backend for BI dashboards**.
 
-The analytical views can be directly connected to tools such as:
+The SQL views can be directly connected to tools such as:
 - Power BI
 - Tableau
 - Metabase
@@ -75,23 +99,12 @@ No dashboard is included at this stage.
 
 ---
 
-## Insights
+## How to Run
 
-Example business KPIs calculated using SQL:
-- total number of orders
-- total revenue
-- average order value (AOV)
-
-KPI queries are defined in: sql/kpi_queries.sql
-
----
-
-## How to run
-
-1. Create a PostgreSQL database (e.g. `olist_db`).
-2. Execute `sql/schema.sql` to create tables and indexes.
-3. Import CSV files into the database using `psql \copy`.
-4. Execute `sql/views.sql` to create analytical views.
-5. Run queries from `sql/kpi_queries.sql` to calculate KPIs.
+1. Create a PostgreSQL database (e.g. `olist_db`)
+2. Execute `sql/schema.sql` to create tables and indexes
+3. Import CSV files into the database
+4. Execute `sql/views.sql` to create analytical views
+5. Run queries from `sql/kpi_queries.sql` to calculate KPIs
 
 The database is then ready for analysis or dashboard integration.
