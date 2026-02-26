@@ -1,5 +1,7 @@
 -- ============================================================
 -- Olist (core) - schema.sql
+CREATE SCHEMA IF NOT EXISTS ecommerce;
+SET search_path TO ecommerce;
 -- Tables covered (based on your CSV headers):
 --   - olist_customers
 --   - olist_orders
