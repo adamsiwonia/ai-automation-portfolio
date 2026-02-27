@@ -1,0 +1,12 @@
+---
+From: customer1@example.com
+Subject: Return request
+Body: I'd like to return order #12345. The product doesn't meet my expectations. How can I proceed?
+---
+From: customer2@example.com
+Subject: Product issue / refund
+Body: My order #777 stopped working after 2 days. What are my options?
+---
+From: customer3@example.com
+Subject: Shipping status
+Body: When will my package for order #999 arrive? It's been 5 business days already.
