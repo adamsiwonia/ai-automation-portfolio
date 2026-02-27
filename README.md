@@ -70,10 +70,26 @@ The project transforms raw transactional data into an **analytics-ready PostgreS
 
 ---
 
-### 03. AI Customer Support Agent *(coming soon)*
-AI-powered support agent answering customer questions using company documentation.  
-Planned focus on LLMs, document retrieval, and automation workflows.
+### 🔹 03. AI Customer Support Agent  
+**Folder:** `projects/03-ai-support-agent`
 
+A production-oriented AI-powered backend that classifies and generates structured responses to customer inquiries.
+
+The system uses the OpenAI API to:
+- Classify customer intent (RETURN, REFUND, SHIPPING, etc.)
+- Generate professional responses
+- Return structured JSON output
+- Log results for further processing
+
+This project focuses on building a scalable backend architecture for real-world business automation use cases.
+
+**Key skills demonstrated:**
+- LLM API integration
+- Prompt engineering
+- Structured JSON validation
+- Error handling
+- Secure environment configuration
+- Backend-first system design
 ---
 
 ### 🔹 04. Data Analytics
