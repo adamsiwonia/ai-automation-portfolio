@@ -1,17 +1,20 @@
 # --- datasets ---
 projects/02-sql-dashboard/data/olist/
 
-# --- env files ---
+# --- environment ---
 .env
-**/.env
+.env.*
 
 # --- python ---
 __pycache__/
+*.pyc
 .ipynb_checkpoints/
 
-# --- os ---
+# --- OS ---
 .DS_Store
 
+# --- IDE ---
 .vscode/
-projects/03-ai-support-agent/data/outputs.json
-data/outputs.json
+
+# --- generated files ---
+*/data/outputs.json
