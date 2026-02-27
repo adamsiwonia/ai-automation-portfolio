@@ -11,3 +11,7 @@ __pycache__/
 
 # --- os ---
 .DS_Store
+
+.vscode/
+projects/03-ai-support-agent/data/outputs.json
+data/outputs.json
