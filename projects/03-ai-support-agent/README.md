@@ -158,7 +158,7 @@ GET /logs?category=Refund%20Request
 
 -Logging & Observability
 
-### -All requests are stored in SQLite with:
+### All requests are stored in SQLite with:
 
 -request_id
 
