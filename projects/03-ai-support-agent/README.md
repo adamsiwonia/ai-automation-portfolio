@@ -1,118 +1,244 @@
-# AI Support Agent (Project 03)
+AI Support Agent – FastAPI Backend (Project 03)
+Overview
 
-## Overview
+This project implements a production-style AI-powered customer support backend built with:
 
-This project implements a minimal AI-powered customer support agent using the OpenAI API.
+FastAPI
 
-### The system:
+OpenAI API
 
--Classifies incoming customer messages
+SQLite
 
--Generates structured responses
+Structured JSON response validation
 
--Returns standardized JSON output
+Persistent request and model-response logging
 
--Logs results for further processing
+The system classifies incoming customer emails, generates structured replies, and stores all interactions for monitoring, debugging, and future analytics.
 
-### The goal of this project is to build a production-oriented AI automation component that can later be deployed in real-world business environments.
+The focus of this project is backend architecture, reliability, and observability rather than UI.
 
-## Current Features (MVP v1)
-
-### Prompt-based intent classification:
-
--RETURN
-
--REFUND
-
--SHIPPING
-
--PRODUCT_QUESTION
-
--OTHER
-
-### Structured JSON output:
-
-{
-  "category": "...",
-  "reply": "...",
-  "next_step": "..."
-}
-
-### Markdown-safe JSON parsing
-
-File-based logging (outputs.json)
-
-Secure API key handling via .env
-
-### Project Structure
+Architecture
 03-ai-support-agent/
 │
-├── main.py
-├── .env (ignored by git)
+├── app/
+│   ├── main.py              # FastAPI routing layer
+│   ├── schemas.py           # Pydantic request/response contracts
+│   ├── core/
+│   │   └── config.py        # Environment & configuration management
+│   ├── services/
+│   │   └── llm.py           # LLM integration layer
+│   └── database/
+│       ├── db.py            # SQLite access layer
+│       └── schema.sql       # Database schema
 │
 ├── prompts/
 │   └── support_prompt.txt
 │
 ├── data/
-│   ├── sample_emails.txt
-│   └── outputs.json
+│   └── sample_emails.txt
 │
 └── README.md
-# How to Run
+Architectural Principles
 
-Install dependencies:
+Clear separation of concerns (routing / service / persistence)
 
-pip install openai python-dotenv
+Strict data contracts via Pydantic
 
-Create a .env file inside the project folder:
+Defensive handling of LLM output
 
+Logging-first design
+
+Environment-based configuration
+
+Request Processing Flow
+
+Request validated via Pydantic schema
+
+LLM service invoked
+
+Raw model output parsed and validated
+
+Fallback triggered if parsing fails
+
+Request logged to SQLite
+
+Response returned with request_id and metrics
+
+Features
+Intent Classification
+
+Supported categories:
+
+RETURN
+
+REFUND
+
+SHIPPING
+
+PRODUCT_QUESTION
+
+OTHER
+
+Note: Category values are model-generated and may not be restricted to strict enums depending on prompt configuration.
+
+Structured JSON Output
+
+All model responses are parsed and validated against a fixed schema:
+
+{
+  "category": "Refund Request",
+  "reply": "Customer-facing response text",
+  "next_step": "Operational follow-up action"
+}
+
+If parsing fails:
+
+The request is still logged
+
+parse_ok is set to 0
+
+A fallback response is generated
+
+The API returns HTTP 502
+
+API Endpoints
+Health Check
+GET /health
+Generate AI Response
+POST /generate
+
+Request body:
+
+{
+  "email": "Customer email text"
+}
+
+Response:
+
+{
+  "request_id": "uuid",
+  "result": {
+    "category": "...",
+    "reply": "...",
+    "next_step": "..."
+  },
+  "usage": {
+    "input_tokens": 65,
+    "output_tokens": 64,
+    "total_tokens": 129
+  },
+  "latency_ms": 2191
+}
+
+Includes:
+
+Token usage tracking
+
+Latency measurement
+
+Request ID for traceability
+
+Retrieve Logs
+GET /logs?limit=20
+GET /logs?parse_ok=0
+GET /logs?category=Refund%20Request
+
+Allows inspection of:
+
+Successful responses
+
+Failed parses
+
+Error messages
+
+Raw model outputs
+
+Logging & Observability
+
+All requests are stored in SQLite with:
+
+request_id
+
+created_at
+
+category
+
+reply
+
+parse_ok
+
+error_message
+
+raw_model_output
+
+This enables:
+
+Debugging malformed LLM responses
+
+Monitoring error rates
+
+Auditing model behavior
+
+Building analytics dashboards
+
+The system is designed with observability in mind from the start.
+
+How to Run
+1. Install dependencies
+pip install fastapi uvicorn openai python-dotenv
+2. Create .env
 OPENAI_API_KEY=your_api_key_here
+3. Start the server
 
-Run the agent:
+From the project directory:
 
-python projects/03-ai-support-agent/main.py
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+4. Interactive API docs
+http://127.0.0.1:8000/docs
+Design Decisions
 
-Generated responses will be saved to:
+JSON schema validation before returning model output
 
-data/outputs.json
-Technical Notes
+Defensive fallback logic for malformed responses
 
-The system removes Markdown code fences before parsing JSON.
+Logging occurs even if generation fails
 
-Fallback handling ensures the pipeline does not crash on malformed model responses.
+Separation between LLM integration and HTTP layer
 
-Designed as a backend-first architecture (frontend layer not yet implemented).
+SQLite chosen for lightweight persistence in MVP phase
 
-# Roadmap
+Latency and token usage exposed for monitoring
 
-Planned improvements:
+Roadmap
 
-SQLite logging
+API key authentication
+
+Rate limiting
+
+Retry logic for malformed JSON responses
 
 Conversation history support
 
-REST API interface (FastAPI)
+Docker containerization
 
-Web demo frontend
+Cloud deployment
 
-Deployment to cloud environment
+Metrics endpoint (/stats)
 
-Rate limiting and request validation
+Purpose
 
-Production-ready error handling
+This project demonstrates:
 
-# Purpose
+LLM integration in backend systems
 
-This project is part of a broader portfolio focused on AI Automation and Data Analytics.
+Production-style API architecture
 
-It demonstrates:
+Structured output enforcement
 
-LLM integration
+Error handling and resilience strategies
 
-Structured response design
+Persistent logging for AI systems
 
-Error handling
+Observability-first backend thinking
 
-Secure configuration management
-
-Real-world automation architecture thinking
+The system is designed to be extended into a multi-tenant, rate-limited production service.

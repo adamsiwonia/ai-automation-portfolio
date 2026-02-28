@@ -1,6 +1,7 @@
 # --- datasets ---
 projects/02-sql-dashboard/data/olist/
-projects/03-ai-support-agent/database/*.sqlite
+projects/03-ai-support-agent/app/database/*.sqlite*
+projects/03-ai-support-agent/data/outputs.json
 
 # --- environment ---
 .env
@@ -25,3 +26,4 @@ __pycache__/
 
 # --- logs ---
 logs/   
+
