@@ -1,23 +1,24 @@
-AI Support Agent – FastAPI Backend (Project 03)
-Overview
+# AI Support Agent – FastAPI Backend (Project 03)
+## Overview
 
 This project implements a production-style AI-powered customer support backend built with:
 
-FastAPI
+-FastAPI
 
-OpenAI API
+-OpenAI API
 
-SQLite
+-SQLite
 
-Structured JSON response validation
+-Structured JSON response validation
 
-Persistent request and model-response logging
+-Persistent request and model-response logging
 
-The system classifies incoming customer emails, generates structured replies, and stores all interactions for monitoring, debugging, and future analytics.
+-The system classifies incoming customer emails, generates structured replies, and stores all interactions for monitoring, debugging, and future analytics.
 
-The focus of this project is backend architecture, reliability, and observability rather than UI.
+-The focus of this project is backend architecture, reliability, and observability rather than UI.
 
-Architecture
+## Architecture
+
 03-ai-support-agent/
 │
 ├── app/
@@ -38,52 +39,54 @@ Architecture
 │   └── sample_emails.txt
 │
 └── README.md
-Architectural Principles
 
-Clear separation of concerns (routing / service / persistence)
+## Architectural Principles
 
-Strict data contracts via Pydantic
+-Clear separation of concerns (routing / service / persistence)
 
-Defensive handling of LLM output
+-Strict data contracts via Pydantic
 
-Logging-first design
+-Defensive handling of LLM output
 
-Environment-based configuration
+-Logging-first design
 
-Request Processing Flow
+-Environment-based configuration
 
-Request validated via Pydantic schema
+-Request Processing Flow
 
-LLM service invoked
+-Request validated via Pydantic schema
 
-Raw model output parsed and validated
+-LLM service invoked
 
-Fallback triggered if parsing fails
+-Raw model output parsed and validated
 
-Request logged to SQLite
+-Fallback triggered if parsing fails
 
-Response returned with request_id and metrics
+-Request logged to SQLite
 
-Features
-Intent Classification
+-Response returned with request_id and metrics
 
-Supported categories:
+## Features
 
-RETURN
+-Intent Classification
 
-REFUND
+-upported categories:
 
-SHIPPING
+-RETURN
 
-PRODUCT_QUESTION
+-REFUND
 
-OTHER
+-SHIPPING
+
+-PRODUCT_QUESTION
+
+-OTHER
 
 Note: Category values are model-generated and may not be restricted to strict enums depending on prompt configuration.
 
-Structured JSON Output
+# Structured JSON Output
 
-All model responses are parsed and validated against a fixed schema:
+-All model responses are parsed and validated against a fixed schema:
 
 {
   "category": "Refund Request",
@@ -91,7 +94,7 @@ All model responses are parsed and validated against a fixed schema:
   "next_step": "Operational follow-up action"
 }
 
-If parsing fails:
+-If parsing fails:
 
 The request is still logged
 
@@ -107,13 +110,13 @@ GET /health
 Generate AI Response
 POST /generate
 
-Request body:
+-Request body:
 
 {
   "email": "Customer email text"
 }
 
-Response:
+-Response:
 
 {
   "request_id": "uuid",
@@ -130,115 +133,116 @@ Response:
   "latency_ms": 2191
 }
 
-Includes:
+### Includes:
 
-Token usage tracking
+-Token usage tracking
 
-Latency measurement
+-Latency measurement
 
-Request ID for traceability
+-Request ID for traceability
 
-Retrieve Logs
+-Retrieve Logs
 GET /logs?limit=20
 GET /logs?parse_ok=0
 GET /logs?category=Refund%20Request
 
-Allows inspection of:
+### Allows inspection of:
 
-Successful responses
+-Successful responses
 
-Failed parses
+-Failed parses
 
-Error messages
+-Error messages
 
-Raw model outputs
+-Raw model outputs
 
-Logging & Observability
+-Logging & Observability
 
-All requests are stored in SQLite with:
+### -All requests are stored in SQLite with:
 
-request_id
+-request_id
 
-created_at
+-created_at
 
-category
+-category
 
-reply
+-reply
 
-parse_ok
+-parse_ok
 
-error_message
+-error_message
 
-raw_model_output
+-raw_model_output
 
-This enables:
+### This enables:
 
-Debugging malformed LLM responses
+-Debugging malformed LLM responses
 
-Monitoring error rates
+-Monitoring error rates
 
-Auditing model behavior
+-Auditing model behavior
 
-Building analytics dashboards
+-Building analytics dashboards
 
 The system is designed with observability in mind from the start.
 
-How to Run
+# How to Run
+
 1. Install dependencies
 pip install fastapi uvicorn openai python-dotenv
 2. Create .env
 OPENAI_API_KEY=your_api_key_here
 3. Start the server
 
-From the project directory:
+## From the project directory:
 
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 4. Interactive API docs
 http://127.0.0.1:8000/docs
 Design Decisions
 
-JSON schema validation before returning model output
+-JSON schema validation before returning model output
 
-Defensive fallback logic for malformed responses
+-Defensive fallback logic for malformed responses
 
-Logging occurs even if generation fails
+-Logging occurs even if generation fails
 
-Separation between LLM integration and HTTP layer
+-Separation between LLM integration and HTTP layer
 
-SQLite chosen for lightweight persistence in MVP phase
+-SQLite chosen for lightweight persistence in MVP phase
 
-Latency and token usage exposed for monitoring
+-Latency and token usage exposed for monitoring
 
-Roadmap
+# Roadmap
 
-API key authentication
+-API key authentication
 
-Rate limiting
+-Rate limiting
 
-Retry logic for malformed JSON responses
+-Retry logic for malformed JSON responses
 
-Conversation history support
+-Conversation history support
 
-Docker containerization
+-Docker containerization
 
-Cloud deployment
+-Cloud deployment
 
-Metrics endpoint (/stats)
+-Metrics endpoint (/stats)
 
-Purpose
+# Purpose
 
 This project demonstrates:
 
-LLM integration in backend systems
+-LLM integration in backend systems
 
-Production-style API architecture
+-Production-style API architecture
 
-Structured output enforcement
+-Structured output enforcement
 
-Error handling and resilience strategies
+-Error handling and resilience strategies
 
-Persistent logging for AI systems
+-Persistent logging for AI systems
 
-Observability-first backend thinking
+-Observability-first backend thinking
 
 The system is designed to be extended into a multi-tenant, rate-limited production service.
