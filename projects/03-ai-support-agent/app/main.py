@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import time
 import uuid
+import traceback
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
 
+from app.core.auth import require_api_key
 from app.core.config import get_settings
 from app.database.db import init_db, insert_log, fetch_logs
-from app.schemas import GenerateRequest, GenerateResponse
+from app.schemas import (
+    GenerateRequest,
+    GenerateResponse,
+    SupportRequest,
+    SupportResponse,
+)
 from app.services.llm import LLMService
 
 app = FastAPI(title="Project 03 - AI Support Agent", version="0.1.0")
@@ -28,12 +35,34 @@ def _startup() -> None:
     init_db()
 
 
+# Public endpoint for Render healthcheck
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
-@app.get("/logs")
+@app.post("/support/reply", response_model=SupportResponse)
+def generate_reply(request_data: SupportRequest, client=Depends(require_api_key)):
+    """
+    Web demo endpoint (MVP).
+    For now returns an echo response that proves:
+    - request parsing works
+    - API key auth works
+    - Swagger/OpenAPI works
+    """
+    request_id = str(uuid.uuid4())
+
+    return SupportResponse(
+        request_id=request_id,
+        client=client["name"],
+        reply=f"Echo: {request_data.message[:500]}",
+        category="OTHER",
+        next_step="N/A",
+        latency_ms=0,
+    )
+
+
+@app.get("/logs", dependencies=[Depends(require_api_key)])
 def logs(
     limit: int = Query(50, ge=1, le=500),
     parse_ok: Optional[int] = Query(None),
@@ -42,13 +71,11 @@ def logs(
     return {"items": fetch_logs(limit=limit, parse_ok=parse_ok, category=category)}
 
 
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
-    return JSONResponse(status_code=500, content={"error": "Internal server error", "request_id": request_id})
-
-
-@app.post("/generate", response_model=GenerateResponse)
+@app.post(
+    "/generate",
+    response_model=GenerateResponse,
+    dependencies=[Depends(require_api_key)],
+)
 async def generate(req: GenerateRequest, request: Request):
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     start = time.perf_counter()
@@ -115,3 +142,21 @@ async def generate(req: GenerateRequest, request: Request):
         "usage": usage,
         "latency_ms": latency_ms,
     }
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+
+    # Helpful in dev + Render logs (doesn't leak secrets unless you print them elsewhere)
+    print("UNHANDLED EXCEPTION:", request.method, request.url.path)
+    traceback.print_exc()
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "request_id": request_id,
+            "path": str(request.url.path),
+        },
+    )

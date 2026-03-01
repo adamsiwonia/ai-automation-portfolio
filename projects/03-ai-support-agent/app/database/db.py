@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Generator, Any
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]  # .../projects/03-ai-support-agent
 DB_PATH = PROJECT_DIR / "app" / "database" / "support_agent.sqlite"
@@ -14,6 +15,15 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout=3000;")
     return conn
+
+
+# ✅ FastAPI dependency (to jest to, czego potrzebuje auth.py)
+def get_db() -> Generator[sqlite3.Connection, None, None]:
+    conn = get_conn()
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
@@ -64,14 +74,14 @@ def insert_log(
         conn.commit()
 
 
-def fetch_logs(limit: int = 50, parse_ok: int | None = None, category: str | None = None):
+def fetch_logs(limit: int = 50, parse_ok: int | None = None, category: str | None = None) -> list[dict[str, Any]]:
     q = """
     SELECT id, request_id, created_at, source, customer_from, subject,
            category, reply, next_step, parse_ok, error_message
     FROM support_logs
     """
     where = []
-    params = []
+    params: list[Any] = []
 
     if parse_ok is not None:
         where.append("parse_ok = ?")
