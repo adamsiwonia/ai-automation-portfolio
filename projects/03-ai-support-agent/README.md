@@ -237,6 +237,18 @@ http://127.0.0.1:8000/docs
 
 ---
 
+## Security
+
+- HMAC-based API key hashing
+
+- X-API-Key header authentication
+
+- Protected /generate and /logs endpoints
+
+- SQLite storage
+
+---
+
 ## Design Decisions
 
 - JSON schema validation before returning model output  
