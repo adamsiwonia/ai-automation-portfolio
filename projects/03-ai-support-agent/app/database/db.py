@@ -5,7 +5,21 @@ from pathlib import Path
 from typing import Generator, Any
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]  # .../projects/03-ai-support-agent
-DB_PATH = PROJECT_DIR / "app" / "database" / "support_agent.sqlite"
+
+ # Make DB path configurable via env (Render-ready)
+ 
+import os
+
+PROJECT_DIR = Path(__file__).resolve().parents[2] 
+
+DB_PATH = Path(
+    os.getenv(
+        "DB_PATH",
+        PROJECT_DIR / "app" / "database" / "support_agent.sqlite"
+    )
+)
+
+SCHEMA_PATH = PROJECT_DIR / "app" / "database" / "schema.sql"
 SCHEMA_PATH = PROJECT_DIR / "app" / "database" / "schema.sql"
 
 
