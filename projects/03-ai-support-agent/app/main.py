@@ -19,8 +19,11 @@ from app.schemas import (
     SupportResponse,
 )
 from app.services.llm import LLMService
+from app.web_demo import router as web_demo_router
 
 app = FastAPI(title="Project 03 - AI Support Agent", version="0.1.0")
+
+app.include_router(web_demo_router)
 
 settings = get_settings()
 llm = LLMService(settings)
