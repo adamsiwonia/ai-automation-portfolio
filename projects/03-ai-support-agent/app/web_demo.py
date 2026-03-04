@@ -242,8 +242,6 @@ HTML = """
       <div class="card">
         <h2>Input</h2>
 
-        <label><b>API key</b> (X-API-Key)</label>
-        <input id="key" placeholder="demo_... or your key" />
 
         <label><b>Customer email</b></label>
         <textarea id="email">Hi, I want to return my order. What’s the process?</textarea>
@@ -354,7 +352,7 @@ Thanks`;
   });
 
   btn.addEventListener("click", async () => {
-    const key = document.getElementById("key").value.trim();
+    const key = "demo_123"
     const email = document.getElementById("email").value;
 
     setStatus("Generating...");
