@@ -4,15 +4,27 @@
 
 This project implements a production-oriented AI-powered customer support backend built with:
 
-- FastAPI  
-- OpenAI API  
-- SQLite  
-- Structured JSON response validation  
-- Persistent request and model-response logging  
+- FastAPI
+- OpenAI API
+- SQLite
+- Structured JSON response validation
+- Persistent request and model-response logging
 
-The system classifies incoming customer emails, generates structured replies, and stores all interactions for monitoring, debugging, and future analytics.
+The system analyzes incoming customer emails, classifies support intent, and generates structured replies suitable for customer support workflows.
 
-The focus of this project is backend architecture, reliability, and observability rather than UI.
+The focus of this project is **backend architecture, reliability, and observability**, rather than UI.
+
+---
+
+## Current Capabilities
+
+- AI email classification
+- AI support reply generation
+- Structured JSON response validation
+- FastAPI backend API
+- SQLite request logging
+- API key authentication
+- Local Gmail integration test
 
 ---
 
@@ -22,18 +34,26 @@ The focus of this project is backend architecture, reliability, and observabilit
 03-ai-support-agent/
 │
 ├── app/
-│   ├── main.py              # FastAPI routing layer
-│   ├── schemas.py           # Pydantic request/response contracts
+│   ├── main.py
+│   ├── schemas.py
+│   ├── web_demo.py
+│
 │   ├── core/
-│   │   └── config.py        # Environment & configuration management
+│   │   ├── auth.py
+│   │   └── config.py
+│
 │   ├── services/
-│   │   └── llm.py           # LLM integration layer
+│   │   └── llm.py
+│
 │   └── database/
-│       ├── db.py            # SQLite access layer
-│       └── schema.sql       # Database schema
+│       ├── db.py
+│       └── schema.sql
 │
 ├── prompts/
 │   └── support_prompt.txt
+│
+├── scripts/
+│   └── gmail_test.py
 │
 ├── data/
 │   └── sample_emails.txt
@@ -56,12 +76,59 @@ The focus of this project is backend architecture, reliability, and observabilit
 
 ## Request Processing Flow
 
-1. Request validated via Pydantic schema  
-2. LLM service invoked  
-3. Raw model output parsed and validated  
-4. Fallback triggered if parsing fails  
-5. Request logged to SQLite  
-6. Response returned with `request_id` and metrics  
+```
+Client Request
+     ↓
+FastAPI Endpoint
+     ↓
+Pydantic Validation
+     ↓
+LLM Service (OpenAI)
+     ↓
+JSON Parsing & Validation
+     ↓
+SQLite Logging
+     ↓
+Structured Response
+```
+
+---
+
+## Gmail Integration (Experimental)
+
+The repository includes a **local Gmail integration test** demonstrating how the backend can be connected to a real support inbox.
+
+Script used for testing:
+
+```
+scripts/gmail_test.py
+```
+
+Pipeline:
+
+```
+Customer Email
+     ↓
+Gmail API
+     ↓
+gmail_test.py
+     ↓
+POST /support/reply
+     ↓
+LLMService (OpenAI)
+     ↓
+AI Support Reply
+```
+
+This simulates how the system could integrate with real support inboxes.
+
+Currently this integration:
+
+- reads the latest email from Gmail
+- sends the email content to the AI backend
+- receives an AI-generated support response
+
+Future iterations will automatically create **Gmail draft replies**.
 
 ---
 
@@ -71,17 +138,17 @@ The focus of this project is backend architecture, reliability, and observabilit
 
 Supported categories:
 
-- RETURN  
-- REFUND  
-- SHIPPING  
-- PRODUCT_QUESTION  
-- OTHER  
+- RETURN
+- REFUND
+- SHIPPING
+- PRODUCT_QUESTION
+- OTHER
 
-> Note: Category values are model-generated and may not be strictly enforced as enums depending on prompt configuration.
+Note: Category values are model-generated and may vary depending on prompt configuration.
 
 ---
 
-### Structured JSON Output
+## Structured JSON Output
 
 All model responses are parsed and validated against a fixed schema:
 
@@ -95,10 +162,10 @@ All model responses are parsed and validated against a fixed schema:
 
 If parsing fails:
 
-- The request is still logged  
-- `parse_ok` is set to `0`  
-- A fallback response is generated  
-- The API returns HTTP `502`  
+- the request is still logged
+- `parse_ok` is set to `0`
+- a fallback response is generated
+- the API returns HTTP `502`
 
 ---
 
@@ -110,15 +177,13 @@ If parsing fails:
 GET /health
 ```
 
----
-
 ### Generate AI Response
 
 ```
 POST /generate
 ```
 
-Request body:
+Request body example:
 
 ```json
 {
@@ -126,7 +191,7 @@ Request body:
 }
 ```
 
-Response:
+Response example:
 
 ```json
 {
@@ -147,11 +212,9 @@ Response:
 
 Includes:
 
-- Token usage tracking  
-- Latency measurement  
-- Request ID for traceability  
-
----
+- token usage tracking
+- latency measurement
+- request ID for traceability
 
 ### Retrieve Logs
 
@@ -163,10 +226,10 @@ GET /logs?category=Refund%20Request
 
 Allows inspection of:
 
-- Successful responses  
-- Failed parses  
-- Error messages  
-- Raw model outputs  
+- successful responses
+- failed parses
+- error messages
+- raw model outputs
 
 ---
 
@@ -174,36 +237,45 @@ Allows inspection of:
 
 All requests are stored in SQLite with:
 
-- `request_id`  
-- `created_at`  
-- `category`  
-- `reply`  
-- `parse_ok`  
-- `error_message`  
-- `raw_model_output`  
+- `request_id`
+- `created_at`
+- `category`
+- `reply`
+- `parse_ok`
+- `error_message`
+- `raw_model_output`
 
 This enables:
 
-- Debugging malformed LLM responses  
-- Monitoring error rates  
-- Auditing model behavior  
-- Building analytics dashboards  
+- debugging malformed LLM responses
+- monitoring error rates
+- auditing model behavior
+- building analytics dashboards
 
-The system is designed with observability in mind from the start.
+The system is designed with **observability in mind from the start**.
+
+---
+
+## Security
+
+- HMAC-based API key hashing
+- `X-API-Key` header authentication
+- protected `/generate` and `/logs` endpoints
+- SQLite storage
 
 ---
 
 ## Why This Matters
 
-In production AI systems, model outputs are not guaranteed to follow strict schemas.
+In production AI systems, model outputs are **not guaranteed to follow strict schemas**.
 
 This project demonstrates how to:
 
-- Enforce structured output validation  
-- Handle malformed responses defensively  
-- Log all interactions for traceability  
-- Measure latency and token usage  
-- Build observability into AI systems from day one  
+- enforce structured output validation
+- handle malformed responses defensively
+- log all interactions for traceability
+- measure latency and token usage
+- build observability into AI systems from day one
 
 ---
 
@@ -211,7 +283,7 @@ This project demonstrates how to:
 
 ### 1. Install dependencies
 
-```
+```bash
 pip install fastapi uvicorn openai python-dotenv
 ```
 
@@ -223,13 +295,11 @@ OPENAI_API_KEY=your_api_key_here
 
 ### 3. Start the server
 
-From the project directory:
-
-```
+```bash
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-### 4. Interactive API docs
+### 4. Open API docs
 
 ```
 http://127.0.0.1:8000/docs
@@ -237,38 +307,15 @@ http://127.0.0.1:8000/docs
 
 ---
 
-## Security
-
-- HMAC-based API key hashing
-
-- X-API-Key header authentication
-
-- Protected /generate and /logs endpoints
-
-- SQLite storage
-
----
-
-## Design Decisions
-
-- JSON schema validation before returning model output  
-- Defensive fallback logic for malformed responses  
-- Logging occurs even if generation fails  
-- Clear separation between LLM integration and HTTP layer  
-- SQLite chosen for lightweight persistence in MVP phase  
-- Latency and token usage exposed for monitoring  
-
----
-
 ## Roadmap
 
-- API key authentication  
-- Rate limiting  
-- Retry logic for malformed JSON responses  
-- Conversation history support  
-- Docker containerization  
-- Cloud deployment  
-- Metrics endpoint (`/stats`)  
+- Gmail draft creation
+- rate limiting
+- retry logic for malformed JSON responses
+- conversation history support
+- Docker containerization
+- cloud deployment
+- metrics endpoint (`/stats`)
 
 ---
 
@@ -276,11 +323,11 @@ http://127.0.0.1:8000/docs
 
 This project demonstrates:
 
-- LLM integration in backend systems  
-- Production-style API architecture  
-- Structured output enforcement  
-- Error handling and resilience strategies  
-- Persistent logging for AI systems  
-- Observability-first backend thinking  
+- LLM integration in backend systems
+- production-style API architecture
+- structured output enforcement
+- error handling and resilience strategies
+- persistent logging for AI systems
+- observability-first backend design
 
-The system is designed to be extended into a multi-tenant, rate-limited production service.
+The system is designed to be extended into a **multi-tenant, rate-limited production AI service**.
