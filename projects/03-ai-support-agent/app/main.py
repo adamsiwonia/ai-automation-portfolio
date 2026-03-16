@@ -46,22 +46,68 @@ def health():
 
 @app.post("/support/reply", response_model=SupportResponse)
 def generate_reply(request_data: SupportRequest, client=Depends(require_api_key)):
-    """
-    Web demo endpoint (MVP).
-    For now returns an echo response that proves:
-    - request parsing works
-    - API key auth works
-    - Swagger/OpenAPI works
-    """
     request_id = str(uuid.uuid4())
+    start = time.perf_counter()
+
+    raw_model_output = None
+    parse_ok = 1
+    error_message = None
+
+    category = "OTHER"
+    reply = "Sorry — we couldn't generate a response right now."
+    next_step = "Please review this message manually."
+
+    try:
+        out = llm.generate_text(
+            email=request_data.message,
+            system=None,
+            prompt_template=None,
+            temperature=0.2,
+            max_tokens=300,
+        )
+
+        raw_model_output = out["raw_text"]
+        parsed = out["parsed"]
+
+        category = parsed.get("category", "OTHER")
+        reply = parsed.get("reply", "Sorry — we couldn't generate a response right now.")
+        next_step = parsed.get("next_step", "Please review this message manually.")
+
+        if not isinstance(category, str) or not isinstance(reply, str) or not isinstance(next_step, str):
+            parse_ok = 0
+            error_message = "Model returned invalid schema types."
+            category = "OTHER"
+            reply = "Sorry — we couldn't generate a response right now."
+            next_step = "Please review this message manually."
+
+    except Exception as e:
+        parse_ok = 0
+        error_message = str(e)
+
+    latency_ms = int((time.perf_counter() - start) * 1000)
+
+    insert_log(
+        request_id=request_id,
+        created_at=now_utc_iso(),
+        source=request_data.source,
+        customer_from=None,
+        subject=None,
+        category=category,
+        reply=reply,
+        next_step=next_step,
+        raw_email=request_data.message,
+        raw_model_output=raw_model_output,
+        parse_ok=parse_ok,
+        error_message=error_message,
+    )
 
     return SupportResponse(
         request_id=request_id,
         client=client["name"],
-        reply=f"Echo: {request_data.message[:500]}",
-        category="OTHER",
-        next_step="N/A",
-        latency_ms=0,
+        reply=reply,
+        category=category,
+        next_step=next_step,
+        latency_ms=latency_ms,
     )
 
 
