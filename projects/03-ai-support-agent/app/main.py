@@ -6,12 +6,12 @@ import traceback
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Request, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.core.auth import require_api_key
 from app.core.config import get_settings
-from app.database.db import init_db, insert_log, fetch_logs
+from app.database.db import fetch_logs, init_db, insert_log
 from app.schemas import (
     GenerateRequest,
     GenerateResponse,
@@ -33,12 +33,27 @@ def now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def get_fallback_result() -> dict[str, str]:
+    return {
+        "category": "OTHER",
+        "reply": "Sorry — we couldn't generate a response right now.",
+        "next_step": "Please review this message manually.",
+    }
+
+
+def is_valid_result(category: object, reply: object, next_step: object) -> bool:
+    return (
+        isinstance(category, str)
+        and isinstance(reply, str)
+        and isinstance(next_step, str)
+    )
+
+
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
 
 
-# Public endpoint for Render healthcheck
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -53,9 +68,10 @@ def generate_reply(request_data: SupportRequest, client=Depends(require_api_key)
     parse_ok = 1
     error_message = None
 
-    category = "OTHER"
-    reply = "Sorry — we couldn't generate a response right now."
-    next_step = "Please review this message manually."
+    fallback = get_fallback_result()
+    category = fallback["category"]
+    reply = fallback["reply"]
+    next_step = fallback["next_step"]
 
     try:
         out = llm.generate_text(
@@ -69,20 +85,23 @@ def generate_reply(request_data: SupportRequest, client=Depends(require_api_key)
         raw_model_output = out["raw_text"]
         parsed = out["parsed"]
 
-        category = parsed.get("category", "OTHER")
-        reply = parsed.get("reply", "Sorry — we couldn't generate a response right now.")
-        next_step = parsed.get("next_step", "Please review this message manually.")
+        category = parsed.get("category", fallback["category"])
+        reply = parsed.get("reply", fallback["reply"])
+        next_step = parsed.get("next_step", fallback["next_step"])
 
-        if not isinstance(category, str) or not isinstance(reply, str) or not isinstance(next_step, str):
+        if not is_valid_result(category, reply, next_step):
             parse_ok = 0
             error_message = "Model returned invalid schema types."
-            category = "OTHER"
-            reply = "Sorry — we couldn't generate a response right now."
-            next_step = "Please review this message manually."
+            category = fallback["category"]
+            reply = fallback["reply"]
+            next_step = fallback["next_step"]
 
     except Exception as e:
         parse_ok = 0
         error_message = str(e)
+        category = fallback["category"]
+        reply = fallback["reply"]
+        next_step = fallback["next_step"]
 
     latency_ms = int((time.perf_counter() - start) * 1000)
 
@@ -132,8 +151,12 @@ async def generate(req: GenerateRequest, request: Request):
     raw_model_output = None
     parse_ok = 1
     error_message = None
-    category = reply = next_step = None
     usage = {}
+
+    fallback = get_fallback_result()
+    category = fallback["category"]
+    reply = fallback["reply"]
+    next_step = fallback["next_step"]
 
     try:
         out = llm.generate_text(
@@ -143,27 +166,28 @@ async def generate(req: GenerateRequest, request: Request):
             temperature=req.temperature,
             max_tokens=req.max_tokens,
         )
+
         raw_model_output = out["raw_text"]
         parsed = out["parsed"]
         usage = out.get("usage", {}) or {}
 
-        category = parsed.get("category")
-        reply = parsed.get("reply")
-        next_step = parsed.get("next_step")
+        category = parsed.get("category", fallback["category"])
+        reply = parsed.get("reply", fallback["reply"])
+        next_step = parsed.get("next_step", fallback["next_step"])
 
-        if not isinstance(category, str) or not isinstance(reply, str) or not isinstance(next_step, str):
+        if not is_valid_result(category, reply, next_step):
             parse_ok = 0
             error_message = "Model returned invalid schema types."
+            category = fallback["category"]
+            reply = fallback["reply"]
+            next_step = fallback["next_step"]
 
     except Exception as e:
         parse_ok = 0
         error_message = str(e)
-        parsed = {
-            "category": "OTHER",
-            "reply": "Sorry — we couldn't generate a response right now.",
-            "next_step": "Please try again later or handle this message manually.",
-        }
-        category, reply, next_step = parsed["category"], parsed["reply"], parsed["next_step"]
+        category = fallback["category"]
+        reply = fallback["reply"]
+        next_step = fallback["next_step"]
 
     latency_ms = int((time.perf_counter() - start) * 1000)
 
@@ -187,7 +211,11 @@ async def generate(req: GenerateRequest, request: Request):
 
     return {
         "request_id": request_id,
-        "result": {"category": category, "reply": reply, "next_step": next_step},
+        "result": {
+            "category": category,
+            "reply": reply,
+            "next_step": next_step,
+        },
         "usage": usage,
         "latency_ms": latency_ms,
     }
@@ -197,7 +225,6 @@ async def generate(req: GenerateRequest, request: Request):
 async def unhandled_exception_handler(request: Request, exc: Exception):
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
 
-    # Helpful in dev + Render logs (doesn't leak secrets unless you print them elsewhere)
     print("UNHANDLED EXCEPTION:", request.method, request.url.path)
     traceback.print_exc()
 
