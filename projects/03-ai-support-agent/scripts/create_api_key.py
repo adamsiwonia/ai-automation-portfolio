@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timezone
-from core.security import generate_api_key, hash_api_key
-from database.db import get_db
+from app.core.security import generate_api_key, hash_api_key
+from app.database.db import get_db
 
 def main():
     name = input("Client name: ")

@@ -54,6 +54,11 @@ def _startup() -> None:
     init_db()
 
 
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "ai-support-agent"}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -98,7 +103,9 @@ def generate_reply(request_data: SupportRequest, client=Depends(require_api_key)
 
     except Exception as e:
         parse_ok = 0
-        error_message = str(e)
+        error_message = repr(e)
+        print("LLM ERROR /support/reply:", repr(e))
+        traceback.print_exc()
         category = fallback["category"]
         reply = fallback["reply"]
         next_step = fallback["next_step"]
@@ -184,7 +191,9 @@ async def generate(req: GenerateRequest, request: Request):
 
     except Exception as e:
         parse_ok = 0
-        error_message = str(e)
+        error_message = repr(e)
+        print("LLM ERROR /generate:", repr(e))
+        traceback.print_exc()
         category = fallback["category"]
         reply = fallback["reply"]
         next_step = fallback["next_step"]

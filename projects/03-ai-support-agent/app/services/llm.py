@@ -20,10 +20,8 @@ def strip_code_fences(text: str) -> str:
     t = text.strip()
     if t.startswith("```"):
         lines = t.splitlines()
-        # remove first line ``` or ```json
         if lines and lines[0].startswith("```"):
             lines = lines[1:]
-        # remove last line ```
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         t = "\n".join(lines).strip()
@@ -50,6 +48,9 @@ class LLMService:
         tmpl = prompt_template or DEFAULT_PROMPT_TEMPLATE
         prompt = tmpl.replace("{{EMAIL}}", email)
 
+        print("OPENAI MODEL:", self.model)
+        print("PROMPT SENT TO MODEL:", prompt)
+
         resp = self.client.responses.create(
             model=self.model,
             input=[
@@ -62,6 +63,9 @@ class LLMService:
 
         raw_text = resp.output_text or ""
         clean = strip_code_fences(raw_text)
+
+        print("RAW MODEL TEXT:", raw_text)
+        print("CLEAN MODEL TEXT:", clean)
 
         parsed = json.loads(clean)
 
