@@ -31,6 +31,7 @@ PROCESSED_LABEL_NAME = "AI_PROCESSED"
 SKIPPED_LABEL_NAME = "AI_SKIPPED"
 
 MAX_MESSAGE_CHARS = 12000
+MY_EMAIL = "adam.pawel.siwonia@gmail.com"
 
 
 def get_gmail_service():
@@ -480,6 +481,13 @@ def process_single_message(
     print("From:", message_data["from_email"])
     print("Subject:", message_data["subject"])
 
+    # Own email filtering may be intentionally disabled to allow testing with the same account. The support agent should be able to handle it gracefully.
+
+    if message_data["from_email"].lower() == MY_EMAIL.lower():
+        print("Skipping: own email.")
+        add_label_to_message(service, message_id, skipped_label_id)
+        return "skipped"
+
     if not message_data["from_email"]:
         print("Skipping: missing sender.")
         add_label_to_message(service, message_id, skipped_label_id)
@@ -509,7 +517,8 @@ def process_single_message(
     print("Accepted for AI processing.")
     print("Body preview:", body[:300])
 
-    result = call_support_agent(body)
+    enriched_message = f"Subject: {message_data['subject']}\n\n{body}"
+    result = call_support_agent(enriched_message)
 
     reply_text = result.get("reply", "").strip()
     category = result.get("category", "")
