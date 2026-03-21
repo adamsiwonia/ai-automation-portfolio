@@ -8,8 +8,7 @@ Automate 60–80% of customer emails (shipping, returns, order status)
 
 ## 🚀 Demo
 
-Try the demo: [ADD YOUR LINK]
-
+Try the demo: https://ai-automation-portfolio-tyou.onrender.com/demo
 Example:
 
 * Paste a customer email
