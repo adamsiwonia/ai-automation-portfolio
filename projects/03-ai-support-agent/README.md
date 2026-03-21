@@ -1,187 +1,183 @@
-# AI Support Agent – FastAPI Backend (Project 03)
+# AI Email Support Assistant (Project 03)
 
-## Overview
-
-This project implements a **production-oriented AI-powered customer support backend** designed to automate responses to repetitive customer emails.
-
-Built with:
-
-* FastAPI
-* OpenAI API
-* SQLite
-* Structured JSON validation
-* Persistent logging & observability
-
-The system processes incoming customer messages, classifies intent, and generates structured, ready-to-send replies.
-
-This project focuses on:
-
-* backend architecture
-* reliability
-* real-world automation use cases
-* production-ready design patterns
+Automate 60–80% of customer emails (shipping, returns, order status)
+→ Save hours every week
+→ Respond faster to customers
 
 ---
 
-## Current Capabilities
+## 🚀 Demo
 
-* AI-powered email classification
-* AI-generated customer support replies
-* Structured JSON validation (safe LLM output handling)
-* FastAPI backend API
-* SQLite request logging
-* API key authentication
-* Gmail worker (polling + draft generation)
+Try the demo: [ADD YOUR LINK]
 
----
+Example:
 
-## System Architecture
-
-```
-03-ai-support-agent/
-│
-├── app/
-│   ├── main.py
-│   ├── schemas.py
-│   ├── web_demo.py
-│
-│   ├── core/
-│   │   ├── auth.py
-│   │   └── config.py
-│
-│   ├── services/
-│   │   └── llm.py
-│
-│   └── database/
-│       ├── db.py
-│       └── schema.sql
-│
-├── prompts/
-│   └── support_prompt.txt
-│
-├── scripts/
-│   └── gmail_test.py   # Gmail worker
-│
-├── data/
-│   └── sample_emails.txt
-│
-└── README.md
-```
+* Paste a customer email
+* Generate a reply in seconds
+* Review before sending
 
 ---
 
-## Architecture Principles
+## 💡 What This Project Does
 
-* Clear separation of concerns (API / service / database)
-* Strict data contracts using Pydantic
-* Defensive handling of LLM output
-* Logging-first design
-* Environment-based configuration
-* Observability by default
+This project is a production-oriented AI customer support backend + demo interface designed to automate repetitive customer emails.
+
+It:
+
+* reads incoming messages
+* classifies intent (returns, shipping, etc.)
+* generates a ready-to-send reply
+* suggests the next internal step
+
+All responses are draft-only — nothing is sent automatically.
 
 ---
 
-## End-to-End Flow
+## ✨ Key Features
+
+* AI-generated draft replies for common customer inquiries
+* Multilingual replies (responds in the same language as the customer)
+* EN / PL interface in demo
+* Structured output validation (safe LLM usage)
+* Gmail integration with automatic draft creation
+* Full request logging and observability
+
+---
+
+## ⚙️ How It Works
+
+1. Customer sends an email
+2. AI analyzes the message
+3. A reply draft is generated
+4. You review and send
+
+---
+
+## 📦 Example Use Cases
+
+* “Where is my order?”
+* “I want to return this item”
+* “Do you have this product in stock?”
+
+---
+
+## 🧠 Why This Matters
+
+Customer support is repetitive and time-consuming.
+
+This project shows how to:
+
+* automate common responses
+* reduce workload for small businesses
+* maintain control with draft-only replies
+* safely use AI with structured validation
+
+---
+
+## 🏗️ System Architecture
 
 ```
 Customer Email
      ↓
-Gmail Worker (polling loop)
+Gmail Worker (polling)
      ↓
 FastAPI (/generate)
      ↓
 LLM Service (OpenAI)
      ↓
-Structured JSON validation
+Structured validation
      ↓
 SQLite logging
      ↓
-AI-generated draft reply
-     ↓
-Gmail Draft created
+Draft reply created
 ```
 
 ---
 
-## Gmail Integration (Worker)
+## 🧩 Tech Stack
 
-The project includes a **Gmail worker** that connects the backend to a real inbox.
+* FastAPI
+* OpenAI API
+* SQLite
+* Gmail API
+* Pydantic
 
-Script:
+---
+
+## 📁 Project Structure
 
 ```
-scripts/gmail_test.py
+app/
+  main.py          # API endpoints
+  schemas.py       # data validation
+  web_demo.py      # demo UI
+
+  core/
+    auth.py
+    config.py
+
+  services/
+    llm.py         # AI logic
+
+  database/
+    db.py
+    schema.sql
+
+scripts/
+  gmail_test.py    # Gmail worker
 ```
 
-### What it does
+---
 
-* polls Gmail inbox every 60 seconds
-* filters non-customer emails (newsletters, promos, alerts)
-* detects customer support messages
-* sends valid messages to the FastAPI backend
+## 🔌 Gmail Integration
+
+The system includes a Gmail worker that:
+
+* polls inbox every 60 seconds
+* filters non-customer emails
+* detects support messages
 * generates AI replies
-* creates **draft replies in Gmail**
-* labels processed / skipped emails
+* creates draft replies in Gmail
+* labels processed emails
 
-### Labels used
+Labels:
 
-* `AI Draft Ready` → processed emails
-* `AI Skipped` → filtered emails
-
-This simulates a real-world automation pipeline for small businesses.
+* AI Draft Ready
+* AI Skipped
 
 ---
 
-## Features
+## 📊 Observability
 
-### Intent Classification
+Each request logs:
 
-Example categories:
+* request_id
+* category
+* reply
+* parse status
+* raw model output
+* latency
+* token usage
 
-* RETURN
-* REFUND
-* SHIPPING
-* PRODUCT_QUESTION
-* OTHER
+This allows:
 
----
-
-## Structured JSON Output
-
-All LLM responses are validated against:
-
-```json
-{
-  "category": "Refund Request",
-  "reply": "Customer-facing response text",
-  "next_step": "Internal action"
-}
-```
-
-If parsing fails:
-
-* request is still logged
-* `parse_ok = 0`
-* fallback response is generated
-* API returns HTTP `502`
+* debugging
+* monitoring
+* auditing AI behavior
 
 ---
 
-## API Endpoints
+## 🔐 Security
 
-### Health Check
-
-```
-GET /health
-```
+* API key authentication (X-API-Key)
+* environment-based secrets
+* protected endpoints
 
 ---
 
-### Generate AI Response
+## 🧪 API Example
 
-```
-POST /generate
-```
+### POST /generate
 
 Request:
 
@@ -202,112 +198,34 @@ Response:
     "next_step": "..."
   },
   "usage": {
-    "input_tokens": 65,
-    "output_tokens": 64,
     "total_tokens": 129
   },
   "latency_ms": 2191
 }
 ```
 
-Includes:
-
-* token usage
-* latency tracking
-* request tracing
-
 ---
 
-### Logs & Observability
-
-```
-GET /logs?limit=20
-GET /logs?parse_ok=0
-GET /logs?category=Refund%20Request
-```
-
-Tracks:
-
-* model outputs
-* errors
-* parsing failures
-* categories
-* raw responses
-
----
-
-## Observability Design
-
-Each request is stored with:
-
-* `request_id`
-* `created_at`
-* `category`
-* `reply`
-* `parse_ok`
-* `error_message`
-* `raw_model_output`
-
-This enables:
-
-* debugging LLM issues
-* monitoring system quality
-* auditing behavior
-* building analytics dashboards
-
----
-
-## Security
-
-* API key authentication (`X-API-Key`)
-* HMAC-based hashing
-* protected endpoints
-* environment-based secrets
-
----
-
-## Why This Matters
-
-LLM outputs are inherently unreliable in structure.
-
-This project demonstrates how to:
-
-* enforce structured output
-* handle malformed responses safely
-* log every interaction
-* measure latency and usage
-* design production-ready AI systems
-
----
-
-## How to Run
-
-### 1. Install dependencies
+## ▶️ How to Run
 
 ```bash
 pip install fastapi uvicorn openai python-dotenv
 ```
 
----
-
-### 2. Create `.env`
+Create `.env`:
 
 ```
 OPENAI_API_KEY=your_api_key_here
 API_KEY=your_internal_api_key
 ```
 
----
-
-### 3. Start backend
+Run backend:
 
 ```bash
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
----
-
-### 4. Run Gmail worker
+Run Gmail worker:
 
 ```bash
 python scripts/gmail_test.py
@@ -315,34 +233,24 @@ python scripts/gmail_test.py
 
 ---
 
-### 5. Open API docs
+## 🛣️ Roadmap
 
-```
-http://127.0.0.1:8000/docs
-```
-
----
-
-## Roadmap
-
-* multi-client (multi-tenant) support
-* rate limiting
-* retry logic for failed parses
+* multi-client support
+* retry logic
 * conversation memory
 * Docker deployment
-* cloud worker deployment
-* metrics endpoint (`/stats`)
+* cloud deployment
+* metrics dashboard
 
 ---
 
-## Purpose
+## 🎯 Purpose
 
 This project demonstrates:
 
 * real-world AI automation
-* backend architecture for LLM systems
-* production-safe output handling
+* production-safe LLM usage
 * full pipeline (email → AI → draft)
-* observability-first system design
+* backend architecture for AI systems
 
-The goal is to evolve this into a **commercial AI support automation service for small businesses**.
+The goal is to evolve this into a commercial AI support automation service for small businesses.

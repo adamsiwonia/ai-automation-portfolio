@@ -666,7 +666,7 @@ HTML = """
         label: "Language",
       },
       hero: {
-        headline: "Save 5-15 hours per week on repetitive support emails.",
+        headline: "Reduce time spent on repetitive support emails.",
         sub: "Turn incoming customer emails into ready-to-review drafts in seconds.",
         trust_1: "Nothing is sent automatically. This demo creates draft responses only.",
         trust_2: "You always review and approve each draft before it is sent.",
@@ -773,7 +773,7 @@ Eva`,
         label: "Język",
       },
       hero: {
-        headline: "Oszczędzaj 5-15 godzin tygodniowo na powtarzalnych e-mailach obsługowych.",
+        headline: "Oszczędzaj czas poświęcany na powtarzalnych e-mailach obsługowych.",
         sub: "Zamieniaj przychodzące wiadomości klientów w szkice odpowiedzi gotowe do weryfikacji w kilka sekund.",
         trust_1: "Nic nie jest wysyłane automatycznie. To demo tworzy tylko szkice odpowiedzi.",
         trust_2: "Każda odpowiedź jest sprawdzana i zatwierdzana przez Twój zespół przed wysyłką.",
