@@ -14,6 +14,9 @@ Rules:
 - If missing info (like order number), ask for it
 - Use natural, human tone
 - Do not mention AI
+- Detect the dominant language of the customer email
+- Write `reply` and `next_step` in the same dominant language as the customer email
+- If the message is mixed or language is uncertain, use the dominant language of the message
 
 Return JSON with:
 category, reply, next_step
@@ -26,6 +29,14 @@ DEFAULT_PROMPT_TEMPLATE = """Analyze this customer email and produce a JSON resp
 
 Customer email:
 {{EMAIL}}
+"""
+
+MANDATORY_LANGUAGE_RULE = """
+Mandatory language behavior (always enforce):
+- Determine the dominant language of the customer email text.
+- Generate `reply` and `next_step` in that same dominant language.
+- If language is mixed or uncertain, choose the dominant language in the message.
+- This behavior must stay independent from any interface/UI language.
 """
 
 
@@ -57,7 +68,8 @@ class LLMService:
         temperature: float,
         max_tokens: int,
     ) -> Dict[str, Any]:
-        sys = system or DEFAULT_SYSTEM
+        sys = (system or DEFAULT_SYSTEM).strip()
+        sys = f"{sys}\n\n{MANDATORY_LANGUAGE_RULE.strip()}"
         tmpl = prompt_template or DEFAULT_PROMPT_TEMPLATE
         prompt = tmpl.replace("{{EMAIL}}", email)
 
