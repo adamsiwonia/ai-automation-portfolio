@@ -622,11 +622,17 @@ HTML = """
     </section>
 
     <section class="card cta" id="ctaSection">
-      <h2 data-i18n="sections.cta_title">Book a free setup call</h2>
-      <p data-i18n="sections.cta_text">See your own inbox workflow with AI draft replies in one guided session.</p>
+      <h2 data-i18n="sections.cta_title">Get a quick demo for your business</h2>
+      <p data-i18n="sections.cta_text">See how this could work with your own inbox and customer emails.</p>
       <div class="actions">
-        <button class="btn-primary" type="button" id="ctaButton" data-i18n="sections.cta_button">Book a free setup call</button>
-        <span class="small" data-i18n="sections.cta_note">CTA button is a demo placeholder and does not submit data.</span>
+       <a
+        class="btn-primary"
+        id="ctaButton"
+        href="mailto:adam.pawel.siwonia@gmail.com?subject=AI%20Email%20Support%20Demo"
+        data-i18n="sections.cta_button"
+      >
+        Get a quick demo
+      </a>
       </div>
     </section>
   </div>
@@ -723,16 +729,15 @@ HTML = """
         works_outlook: "Outlook (coming soon)",
         works_sms: "SMS (coming soon)",
         works_whatsapp: "WhatsApp (future)",
-        cta_title: "Book a free setup call",
-        cta_text: "See your own inbox workflow with AI draft replies in one guided session.",
-        cta_button: "Book a free setup call",
-        cta_note: "CTA button is a demo placeholder and does not submit data.",
+        cta_title: "Get a quick demo for your business",
+        cta_text: "See how this could work with your own inbox and customer emails.",
+        cta_button: "Get a quick demo",
       },
       status: {
         sample_inserted: "Sample inserted",
         copied: "Copied",
         copy_failed: "Copy failed",
-        cta_clicked: "CTA placeholder clicked",
+        cta_clicked: "Opening email draft...",
         generating: "Generating...",
         loading: "Loading...",
         done: "Done",
@@ -773,7 +778,7 @@ Eva`,
         label: "Język",
       },
       hero: {
-        headline: "Oszczędzaj czas poświęcany na powtarzalnych e-mailach obsługowych.",
+        headline: "Oszczędzaj czas poświęcany na powtarzalnych   e-mailach obsługowych.",
         sub: "Zamieniaj przychodzące wiadomości klientów w szkice odpowiedzi gotowe do weryfikacji w kilka sekund.",
         trust_1: "Nic nie jest wysyłane automatycznie. To demo tworzy tylko szkice odpowiedzi.",
         trust_2: "Każda odpowiedź jest sprawdzana i zatwierdzana przez Twój zespół przed wysyłką.",
@@ -830,16 +835,15 @@ Eva`,
         works_outlook: "Outlook (wkrótce)",
         works_sms: "SMS (wkrótce)",
         works_whatsapp: "WhatsApp (przyszłość)",
-        cta_title: "Umów bezpłatną rozmowę wdrożeniową",
-        cta_text: "Zobacz przepływ pracy na Twojej skrzynce i szkice odpowiedzi AI podczas jednej sesji.",
-        cta_button: "Umów bezpłatną rozmowę",
-        cta_note: "Przycisk CTA jest placeholderem demo i nie wysyła danych.",
+        cta_title: "Zobacz szybkie demo dla swojej firmy",
+        cta_text: "Sprawdź, jak to mogłoby działać z Twoją skrzynką i wiadomościami od klientów.",
+        cta_button: "Zobacz szybkie demo",
       },
       status: {
         sample_inserted: "Wstawiono przykład",
         copied: "Skopiowano",
         copy_failed: "Kopiowanie nieudane",
-        cta_clicked: "Kliknięto placeholder CTA",
+        cta_clicked: "Otwieranie szkicu wiadomości...",
         generating: "Generowanie...",
         loading: "Ładowanie...",
         done: "Gotowe",
