@@ -19,6 +19,15 @@ Return JSON with:
 category, reply, next_step
 """
 
+DEFAULT_PROMPT_TEMPLATE = """Analyze this customer email and produce a JSON response with:
+- category
+- reply
+- next_step
+
+Customer email:
+{{EMAIL}}
+"""
+
 
 def strip_code_fences(text: str) -> str:
     t = text.strip()

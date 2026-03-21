@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
@@ -352,7 +354,7 @@ Thanks`;
   });
 
   btn.addEventListener("click", async () => {
-    const key = "demo_123"
+    const key = "__CLIENT_API_KEY__"
     const email = document.getElementById("email").value;
 
     setStatus("Generating...");
@@ -415,4 +417,5 @@ Thanks`;
 
 @router.get("/demo", response_class=HTMLResponse, include_in_schema=False)
 def demo_page():
-    return HTMLResponse(HTML)
+    client_key = os.getenv("DEMO_API_KEY") or os.getenv("API_KEY") or ""
+    return HTMLResponse(HTML.replace("__CLIENT_API_KEY__", client_key))

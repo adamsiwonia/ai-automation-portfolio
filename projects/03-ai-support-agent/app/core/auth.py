@@ -24,14 +24,21 @@ def _extract_api_key(x_api_key: str | None, authorization: str | None) -> str | 
 
 
 def _auth_via_demo_key(api_key: str, request: Request) -> dict[str, Any] | None:
-    """Stateless fallback for Render free tier: validates against DEMO_API_KEY env var."""
+    """Stateless fallback for demo/local mode via env keys."""
     demo_key = os.getenv("DEMO_API_KEY")
+    legacy_key = os.getenv("API_KEY")
     print("DEBUG auth -> DEMO_API_KEY loaded:", bool(demo_key))
+    print("DEBUG auth -> API_KEY loaded:", bool(legacy_key))
 
     if demo_key and api_key == demo_key:
         print("DEBUG auth -> DEMO fallback matched")
         request.state.client_name = "demo-env-key"
         return {"name": "demo-env-key", "is_active": 1, "mode": "env"}
+
+    if legacy_key and api_key == legacy_key:
+        print("DEBUG auth -> API_KEY fallback matched")
+        request.state.client_name = "legacy-env-key"
+        return {"name": "legacy-env-key", "is_active": 1, "mode": "env"}
 
     print("DEBUG auth -> DEMO fallback did not match")
     return None
@@ -49,6 +56,7 @@ def require_api_key(
     print("DEBUG auth -> extracted api_key value:", api_key)
     print("DEBUG auth -> API_KEY_HMAC_SECRET loaded:", bool(os.getenv("API_KEY_HMAC_SECRET")))
     print("DEBUG auth -> DEMO_API_KEY loaded:", bool(os.getenv("DEMO_API_KEY")))
+    print("DEBUG auth -> API_KEY loaded:", bool(os.getenv("API_KEY")))
 
     if not api_key:
         print("DEBUG auth -> missing API key")

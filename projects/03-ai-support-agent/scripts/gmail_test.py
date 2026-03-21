@@ -11,7 +11,9 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from dotenv import load_dotenv
 
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +26,7 @@ SCOPES = [
 ]
 
 FASTAPI_GENERATE_URL = os.getenv("FASTAPI_GENERATE_URL", "http://127.0.0.1:8000/generate")
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("API_KEY") or os.getenv("DEMO_API_KEY")
 PROCESSED_LABEL_NAME = os.getenv("PROCESSED_LABEL_NAME", "AI Draft Ready")
 SKIPPED_LABEL_NAME = os.getenv("SKIPPED_LABEL_NAME", "AI Skipped")
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
@@ -397,7 +399,7 @@ def looks_like_customer_email(subject, body):
 
 def generate_ai_reply(email_text):
     if not API_KEY:
-        raise ValueError("Missing API_KEY environment variable.")
+        raise ValueError("Missing API_KEY/DEMO_API_KEY environment variable.")
 
     payload = {
         "email": email_text,
