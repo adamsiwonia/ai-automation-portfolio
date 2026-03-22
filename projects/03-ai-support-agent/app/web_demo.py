@@ -778,7 +778,7 @@ Eva`,
         label: "Język",
       },
       hero: {
-        headline: "Oszczędzaj czas poświęcany na powtarzalnych   e-mailach obsługowych.",
+        headline: "Automatyzuj odpowiedzi na e-maile klientów i odzyskaj godziny co tydzień.",
         sub: "Zamieniaj przychodzące wiadomości klientów w szkice odpowiedzi gotowe do weryfikacji w kilka sekund.",
         trust_1: "Nic nie jest wysyłane automatycznie. To demo tworzy tylko szkice odpowiedzi.",
         trust_2: "Każda odpowiedź jest sprawdzana i zatwierdzana przez Twój zespół przed wysyłką.",
