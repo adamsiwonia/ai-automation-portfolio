@@ -2,21 +2,28 @@ import base64
 import logging
 import os
 import re
+import sys
 import time
+from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.utils import parseaddr
 
 import requests
 from dotenv import load_dotenv
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TOKEN_PATH = os.path.join(PROJECT_ROOT, "token.json")
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
+TOKEN_PATH = os.path.join(PROJECT_ROOT, "token.json")
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
+from app.services.mailboxes import GmailMailbox, load_active_gmail_mailboxes, update_mailbox_tokens
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,13 +36,25 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",
 ]
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TOKEN_PATH = os.path.join(PROJECT_ROOT, "token.json")
+GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+DEFAULT_SUPPORT_REPLY_ENDPOINT = "http://127.0.0.1:8000/support/reply"
 
-CLOUD_RUN_URL = "https://ai-support-agent-978690358716.europe-west1.run.app"
-SUPPORT_REPLY_ENDPOINT = f"{CLOUD_RUN_URL}/support/reply"
 
-DEMO_API_KEY = os.getenv("DEMO_API_KEY", "")
+def _resolve_support_reply_endpoint() -> str:
+    explicit_endpoint = (os.getenv("SUPPORT_REPLY_ENDPOINT") or "").strip()
+    if explicit_endpoint:
+        return explicit_endpoint
+
+    base_url = (os.getenv("SUPPORT_BASE_URL") or "").strip()
+    if base_url:
+        return f"{base_url.rstrip('/')}/support/reply"
+
+    return DEFAULT_SUPPORT_REPLY_ENDPOINT
+
+
+SUPPORT_REPLY_ENDPOINT = _resolve_support_reply_endpoint()
+
+DEMO_API_KEY = (os.getenv("DEMO_API_KEY") or os.getenv("API_KEY") or "").strip()
 POLL_INTERVAL_SECONDS = 60
 MAX_RESULTS_PER_CYCLE = 10
 DELAY_BETWEEN_EMAILS_SECONDS = 1.0
@@ -44,7 +63,7 @@ PROCESSED_LABEL_NAME = "AI_PROCESSED"
 SKIPPED_LABEL_NAME = "AI_SKIPPED"
 
 MAX_MESSAGE_CHARS = 12000
-MY_EMAIL = "adam.pawel.siwonia@gmail.com"
+MY_EMAIL = os.getenv("MY_EMAIL", "adam.pawel.siwonia@gmail.com")
 
 
 def log_message_event(action: str, message_data: dict | None = None, **extra) -> None:
@@ -64,7 +83,7 @@ def log_message_event(action: str, message_data: dict | None = None, **extra) ->
     logger.info(" | ".join(parts))
 
 
-def get_gmail_service():
+def get_legacy_gmail_service():
     creds = None
 
     if os.path.exists(TOKEN_PATH):
@@ -75,6 +94,61 @@ def get_gmail_service():
 
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
+
+    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+
+def _parse_token_expiry(raw_expiry: str | None) -> datetime | None:
+    if not raw_expiry:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(raw_expiry.replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("Invalid token_expiry format, ignoring: %r", raw_expiry)
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+
+    # google-auth compares expiry against naive UTC datetimes.
+    return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def get_db_mailbox_gmail_service(mailbox: GmailMailbox):
+    if not mailbox.refresh_token:
+        raise RuntimeError(f"Mailbox {mailbox.id} missing refresh_token")
+
+    client_id = (os.getenv("GOOGLE_CLIENT_ID") or "").strip()
+    client_secret = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
+    if not client_id or not client_secret:
+        raise RuntimeError("Missing GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET for DB mailbox auth")
+
+    creds = Credentials(
+        token=mailbox.access_token or None,
+        refresh_token=mailbox.refresh_token,
+        token_uri=GOOGLE_TOKEN_URI,
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=mailbox.scopes or SCOPES,
+    )
+
+    expiry = _parse_token_expiry(mailbox.token_expiry)
+    if expiry:
+        creds.expiry = expiry
+
+    if not creds.valid and creds.refresh_token:
+        creds.refresh(Request())
+        updated_expiry = creds.expiry.isoformat() if creds.expiry else None
+        update_mailbox_tokens(
+            mailbox_id=mailbox.id,
+            access_token=creds.token,
+            refresh_token=creds.refresh_token,
+            token_expiry=updated_expiry,
+        )
+
+    if not creds.valid:
+        raise RuntimeError(f"Mailbox {mailbox.id} credentials are invalid and could not be refreshed")
 
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
@@ -111,15 +185,20 @@ def add_label_to_message(service, message_id: str, label_id: str):
     ).execute()
 
 
-def get_candidate_messages(service, max_results: int = 10) -> list[dict]:
+def get_candidate_messages(
+    service,
+    processed_label_name: str,
+    skipped_label_name: str,
+    max_results: int = 10,
+) -> list[dict]:
     query = (
         f'in:inbox is:unread '
         f'-category:promotions '
         f'-category:social '
         f'-category:updates '
         f'-category:forums '
-        f'-label:"{PROCESSED_LABEL_NAME}" '
-        f'-label:"{SKIPPED_LABEL_NAME}"'
+        f'-label:"{processed_label_name}" '
+        f'-label:"{skipped_label_name}"'
     )
 
     response = service.users().messages().list(
@@ -441,13 +520,13 @@ def read_message(service, original_message: dict) -> dict:
     }
 
 
-def call_support_agent(message_text: str) -> dict:
+def call_support_agent(message_text: str, source: str) -> dict:
     headers = {
         "X-API-Key": DEMO_API_KEY,
         "Content-Type": "application/json",
     }
     payload = {
-        "source": "gmail",
+        "source": source,
         "message": message_text,
     }
 
@@ -498,6 +577,8 @@ def process_single_message(
     original_message: dict,
     processed_label_id: str,
     skipped_label_id: str,
+    mailbox_email: str,
+    source: str,
 ):
     message_id = original_message["id"]
 
@@ -512,7 +593,7 @@ def process_single_message(
     message_data = read_message(service, original_message)
     log_message_event("Inspecting message", message_data)
 
-    if message_data["from_email"].lower() == MY_EMAIL.lower():
+    if mailbox_email and message_data["from_email"].lower() == mailbox_email.lower():
         log_message_event("Skipping own email", message_data)
         add_label_to_message(service, message_id, skipped_label_id)
         return "skipped"
@@ -546,7 +627,7 @@ def process_single_message(
     log_message_event("Accepted for AI processing", message_data, body_chars=len(body))
 
     enriched_message = f"Subject: {message_data['subject']}\n\n{body}"
-    result = call_support_agent(enriched_message)
+    result = call_support_agent(enriched_message, source=source)
 
     reply_text = result.get("reply", "").strip()
     category = result.get("category", "")
@@ -579,10 +660,24 @@ def process_single_message(
     return "processed"
 
 
-def process_inbox(service, processed_label_id: str, skipped_label_id: str):
-    logger.info("Checking inbox")
+def process_inbox(
+    service,
+    processed_label_id: str,
+    skipped_label_id: str,
+    *,
+    processed_label_name: str,
+    skipped_label_name: str,
+    mailbox_email: str,
+    source: str,
+):
+    logger.info("Checking inbox | mailbox=%s", mailbox_email or "-")
 
-    messages = get_candidate_messages(service, max_results=MAX_RESULTS_PER_CYCLE)
+    messages = get_candidate_messages(
+        service,
+        processed_label_name=processed_label_name,
+        skipped_label_name=skipped_label_name,
+        max_results=MAX_RESULTS_PER_CYCLE,
+    )
 
     if not messages:
         logger.info("No unread candidate messages found")
@@ -592,7 +687,7 @@ def process_inbox(service, processed_label_id: str, skipped_label_id: str):
     skipped_count = 0
     error_count = 0
 
-    logger.info("Found %s message(s)", len(messages))
+    logger.info("Found %s message(s) | mailbox=%s", len(messages), mailbox_email or "-")
 
     for original_message in messages:
         message_id = original_message.get("id")
@@ -603,6 +698,8 @@ def process_inbox(service, processed_label_id: str, skipped_label_id: str):
                 original_message,
                 processed_label_id,
                 skipped_label_id,
+                mailbox_email=mailbox_email,
+                source=source,
             )
 
             if result == "processed":
@@ -630,10 +727,37 @@ def process_inbox(service, processed_label_id: str, skipped_label_id: str):
             error_count += 1
 
     logger.info(
-        "Cycle finished | processed=%s | skipped=%s | errors=%s",
+        "Cycle finished | mailbox=%s | processed=%s | skipped=%s | errors=%s",
+        mailbox_email or "-",
         processed_count,
         skipped_count,
         error_count,
+    )
+
+
+def _build_support_source(client_name: str, mailbox_email: str) -> str:
+    candidate = (client_name or mailbox_email or "unknown").strip().lower()
+    normalized = re.sub(r"[^a-z0-9._-]+", "_", candidate).strip("_")
+    return f"gmail:{normalized or 'unknown'}"
+
+
+def process_db_mailbox(mailbox: GmailMailbox) -> None:
+    label_processed = mailbox.processed_label or PROCESSED_LABEL_NAME
+    label_skipped = mailbox.skipped_label or SKIPPED_LABEL_NAME
+    source = _build_support_source(mailbox.client_name, mailbox.mailbox_email)
+
+    service = get_db_mailbox_gmail_service(mailbox)
+    processed_label_id = ensure_label(service, label_processed)
+    skipped_label_id = ensure_label(service, label_skipped)
+
+    process_inbox(
+        service,
+        processed_label_id,
+        skipped_label_id,
+        processed_label_name=label_processed,
+        skipped_label_name=label_skipped,
+        mailbox_email=mailbox.mailbox_email,
+        source=source,
     )
 
 
@@ -641,43 +765,92 @@ def main():
     if not DEMO_API_KEY:
         raise RuntimeError("Missing DEMO_API_KEY in .env")
 
-    service = get_gmail_service()
-    processed_label_id = ensure_label(service, PROCESSED_LABEL_NAME)
-    skipped_label_id = ensure_label(service, SKIPPED_LABEL_NAME)
+    legacy_service = None
+    legacy_processed_label_id = None
+    legacy_skipped_label_id = None
+    legacy_token_error_logged = False
 
     logger.info(
-        "Worker started | processed_label=%s | skipped_label=%s | poll_interval=%ss",
+        "Worker started | default_processed_label=%s | default_skipped_label=%s | poll_interval=%ss",
         PROCESSED_LABEL_NAME,
         SKIPPED_LABEL_NAME,
         POLL_INTERVAL_SECONDS,
     )
+    logger.info("Support reply endpoint | url=%s", SUPPORT_REPLY_ENDPOINT)
 
     while True:
         cycle_started_at = time.time()
 
         try:
-            process_inbox(service, processed_label_id, skipped_label_id)
+            active_mailboxes = load_active_gmail_mailboxes()
+
+            if active_mailboxes:
+                logger.info("Loaded %s active mailbox(es) from DB", len(active_mailboxes))
+                for mailbox in active_mailboxes:
+                    try:
+                        process_db_mailbox(mailbox)
+                    except HttpError as e:
+                        logger.exception(
+                            "Gmail API error for DB mailbox | id=%s | mailbox=%s | error=%r",
+                            mailbox.id,
+                            mailbox.mailbox_email,
+                            e,
+                        )
+                    except Exception as e:
+                        logger.exception(
+                            "Failed DB mailbox cycle | id=%s | mailbox=%s | error=%r",
+                            mailbox.id,
+                            mailbox.mailbox_email,
+                            e,
+                        )
+            else:
+                try:
+                    if legacy_service is None:
+                        logger.info("No active DB mailboxes found; using legacy token.json fallback")
+                        legacy_service = get_legacy_gmail_service()
+                        legacy_processed_label_id = ensure_label(legacy_service, PROCESSED_LABEL_NAME)
+                        legacy_skipped_label_id = ensure_label(legacy_service, SKIPPED_LABEL_NAME)
+                        legacy_token_error_logged = False
+
+                    process_inbox(
+                        legacy_service,
+                        legacy_processed_label_id,
+                        legacy_skipped_label_id,
+                        processed_label_name=PROCESSED_LABEL_NAME,
+                        skipped_label_name=SKIPPED_LABEL_NAME,
+                        mailbox_email=MY_EMAIL,
+                        source="gmail",
+                    )
+                except RefreshError:
+                    legacy_service = None
+                    legacy_processed_label_id = None
+                    legacy_skipped_label_id = None
+                    if not legacy_token_error_logged:
+                        logger.error(
+                            "Legacy Gmail token.json is expired or revoked. Re-run Gmail auth to recreate token.json."
+                        )
+                        legacy_token_error_logged = True
 
         except HttpError as e:
             logger.exception("Worker cycle Gmail API error: %r", e)
 
-            try:
-                logger.info("Re-authenticating Gmail service after API error")
-                service = get_gmail_service()
-                processed_label_id = ensure_label(service, PROCESSED_LABEL_NAME)
-                skipped_label_id = ensure_label(service, SKIPPED_LABEL_NAME)
-                logger.info("Re-authentication successful")
-            except Exception as reauth_error:
-                logger.exception("Failed to re-authenticate Gmail service: %r", reauth_error)
+            # Legacy fallback session can expire; force re-auth for next cycle.
+            legacy_service = None
+            legacy_processed_label_id = None
+            legacy_skipped_label_id = None
 
         except Exception as e:
             logger.exception("Worker loop error: %r", e)
+
+            # Keep legacy fallback resilient if its local session failed.
+            legacy_service = None
+            legacy_processed_label_id = None
+            legacy_skipped_label_id = None
 
         elapsed = time.time() - cycle_started_at
         sleep_for = max(0, POLL_INTERVAL_SECONDS - elapsed)
         logger.info("Cycle complete | sleeping_for=%.2fs", sleep_for)
         time.sleep(sleep_for)
-        
 
 
 if __name__ == "__main__":
