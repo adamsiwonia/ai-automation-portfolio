@@ -127,9 +127,11 @@ def update_mailbox_tokens(
     refresh_token: str | None,
     token_expiry: str | None,
 ) -> None:
+    normalized_refresh_token = (refresh_token or "").strip() or None
+
     query = """
     UPDATE gmail_mailboxes
-    SET access_token = ?, refresh_token = ?, token_expiry = ?, updated_at = ?
+    SET access_token = ?, refresh_token = COALESCE(?, refresh_token), token_expiry = ?, updated_at = ?
     WHERE id = ?
     """
 
@@ -139,7 +141,7 @@ def update_mailbox_tokens(
                 query,
                 (
                     access_token,
-                    refresh_token,
+                    normalized_refresh_token,
                     token_expiry,
                     _now_utc_iso(),
                     mailbox_id,
@@ -148,3 +150,117 @@ def update_mailbox_tokens(
             conn.commit()
     except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
         logger.warning("Failed to update mailbox token state for mailbox_id=%s: %r", mailbox_id, exc)
+
+
+def _normalize_scopes_for_storage(scopes: list[str] | str | None) -> str:
+    if scopes is None:
+        cleaned = DEFAULT_GMAIL_SCOPES.copy()
+    elif isinstance(scopes, str):
+        cleaned = _parse_scopes(scopes)
+    else:
+        cleaned = [str(item).strip() for item in scopes if str(item).strip()]
+        if not cleaned:
+            cleaned = DEFAULT_GMAIL_SCOPES.copy()
+
+    return json.dumps(cleaned, ensure_ascii=True)
+
+
+def upsert_gmail_mailbox_oauth(
+    *,
+    client_name: str,
+    mailbox_email: str,
+    access_token: str,
+    refresh_token: str | None,
+    token_expiry: str | None,
+    scopes: list[str] | str | None,
+    processed_label: str | None,
+    skipped_label: str | None,
+    active: bool = True,
+) -> dict[str, object]:
+    normalized_email = (mailbox_email or "").strip().lower()
+    if not normalized_email:
+        raise ValueError("mailbox_email is required")
+
+    normalized_client_name = (client_name or normalized_email).strip() or normalized_email
+    normalized_access_token = (access_token or "").strip()
+    if not normalized_access_token:
+        raise ValueError("access_token is required")
+
+    normalized_refresh_token = (refresh_token or "").strip() or None
+    normalized_processed_label = (processed_label or DEFAULT_PROCESSED_LABEL).strip() or DEFAULT_PROCESSED_LABEL
+    normalized_skipped_label = (skipped_label or DEFAULT_SKIPPED_LABEL).strip() or DEFAULT_SKIPPED_LABEL
+    scopes_json = _normalize_scopes_for_storage(scopes)
+    now = _now_utc_iso()
+
+    insert_query = """
+    INSERT INTO gmail_mailboxes
+    (
+      client_name,
+      mailbox_email,
+      access_token,
+      refresh_token,
+      token_expiry,
+      scopes,
+      processed_label,
+      skipped_label,
+      active,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(mailbox_email) DO UPDATE SET
+      client_name = excluded.client_name,
+      access_token = excluded.access_token,
+      refresh_token = COALESCE(excluded.refresh_token, gmail_mailboxes.refresh_token),
+      token_expiry = excluded.token_expiry,
+      scopes = excluded.scopes,
+      processed_label = excluded.processed_label,
+      skipped_label = excluded.skipped_label,
+      active = excluded.active,
+      updated_at = excluded.updated_at
+    """
+
+    try:
+        with get_conn() as conn:
+            existing_row = conn.execute(
+                "SELECT id FROM gmail_mailboxes WHERE mailbox_email = ?",
+                (normalized_email,),
+            ).fetchone()
+            created = existing_row is None
+
+            conn.execute(
+                insert_query,
+                (
+                    normalized_client_name,
+                    normalized_email,
+                    normalized_access_token,
+                    normalized_refresh_token,
+                    token_expiry,
+                    scopes_json,
+                    normalized_processed_label,
+                    normalized_skipped_label,
+                    1 if active else 0,
+                    now,
+                    now,
+                ),
+            )
+
+            row = conn.execute(
+                "SELECT id, mailbox_email, active FROM gmail_mailboxes WHERE mailbox_email = ?",
+                (normalized_email,),
+            ).fetchone()
+            conn.commit()
+
+            if not row:
+                raise RuntimeError("Mailbox upsert succeeded but row could not be reloaded")
+
+            return {
+                "id": int(row["id"]),
+                "mailbox_email": (row["mailbox_email"] or "").strip().lower(),
+                "active": bool(row["active"]),
+                "created": created,
+            }
+
+    except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+        logger.exception("Failed to upsert gmail mailbox | mailbox_email=%s | error=%r", normalized_email, exc)
+        raise

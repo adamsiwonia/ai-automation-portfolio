@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 import uuid
@@ -19,7 +20,24 @@ from app.schemas import (
     SupportRequest,
     SupportResponse,
 )
+from app.services.google_oauth import (
+    GoogleOAuthConfigError,
+    GoogleOAuthExchangeError,
+    GoogleOAuthStateError,
+    build_google_auth_url,
+    create_oauth_state,
+    derive_token_expiry_iso,
+    exchange_google_code,
+    fetch_gmail_mailbox_email,
+    get_google_oauth_config,
+    parse_oauth_state,
+)
 from app.services.llm import LLMService
+from app.services.mailboxes import (
+    DEFAULT_PROCESSED_LABEL,
+    DEFAULT_SKIPPED_LABEL,
+    upsert_gmail_mailbox_oauth,
+)
 from app.web_demo import router as web_demo_router
 
 app = FastAPI(title="Project 03 - AI Support Agent", version="0.1.0")
@@ -139,6 +157,15 @@ def is_valid_result(category: object, reply: object, next_step: object) -> bool:
         and isinstance(reply, str)
         and isinstance(next_step, str)
     )
+
+
+def _parse_scope_value(raw_scope: object, fallback_scopes: list[str]) -> list[str]:
+    if isinstance(raw_scope, str):
+        cleaned = raw_scope.replace(",", " ")
+        scopes = [part.strip() for part in cleaned.split(" ") if part.strip()]
+        if scopes:
+            return scopes
+    return fallback_scopes
 
 
 @app.on_event("startup")
@@ -319,6 +346,133 @@ async def generate(req: GenerateRequest, request: Request):
         },
         "usage": usage,
         "latency_ms": latency_ms,
+    }
+
+
+@app.get("/auth/google/start")
+def auth_google_start(
+    client_name: Optional[str] = Query(default=None, min_length=1, max_length=200),
+    processed_label: str = Query(default=DEFAULT_PROCESSED_LABEL, min_length=1, max_length=100),
+    skipped_label: str = Query(default=DEFAULT_SKIPPED_LABEL, min_length=1, max_length=100),
+    client=Depends(require_api_key),
+):
+    try:
+        config = get_google_oauth_config()
+    except GoogleOAuthConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    authenticated_client_name = None
+    try:
+        authenticated_client_name = client["name"]
+    except Exception:
+        authenticated_client_name = None
+
+    effective_client_name = (client_name or authenticated_client_name or "oauth-mailbox").strip()
+    state_secret = (os.getenv("GOOGLE_OAUTH_STATE_SECRET") or config.client_secret).strip()
+    if not state_secret:
+        raise HTTPException(status_code=500, detail="OAuth state signing secret is not configured")
+
+    state = create_oauth_state(
+        {
+            "client_name": effective_client_name,
+            "processed_label": processed_label.strip(),
+            "skipped_label": skipped_label.strip(),
+        },
+        state_secret,
+    )
+
+    authorization_url = build_google_auth_url(config, state)
+    return {
+        "authorization_url": authorization_url,
+        "redirect_uri": config.redirect_uri,
+        "scopes": config.scopes,
+    }
+
+
+@app.get("/auth/google/callback")
+def auth_google_callback(
+    code: Optional[str] = Query(default=None),
+    state: Optional[str] = Query(default=None),
+    error: Optional[str] = Query(default=None),
+    error_description: Optional[str] = Query(default=None),
+):
+    if error:
+        if error == "access_denied":
+            detail = "Google OAuth consent was denied by the user."
+        else:
+            detail = f"Google OAuth returned an error: {error}"
+        if error_description:
+            detail = f"{detail} ({error_description})"
+        raise HTTPException(status_code=400, detail=detail)
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing OAuth code in callback.")
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state in callback.")
+
+    try:
+        config = get_google_oauth_config()
+    except GoogleOAuthConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    state_secret = (os.getenv("GOOGLE_OAUTH_STATE_SECRET") or config.client_secret).strip()
+    if not state_secret:
+        raise HTTPException(status_code=500, detail="OAuth state signing secret is not configured")
+
+    try:
+        state_payload = parse_oauth_state(state, state_secret)
+    except GoogleOAuthStateError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid OAuth state: {exc}")
+
+    try:
+        token_payload = exchange_google_code(config, code)
+    except GoogleOAuthExchangeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    access_token = (token_payload.get("access_token") or "").strip()
+    refresh_token = (token_payload.get("refresh_token") or "").strip() or None
+    token_expiry = derive_token_expiry_iso(token_payload.get("expires_in"))
+    scopes = _parse_scope_value(token_payload.get("scope"), config.scopes)
+
+    try:
+        mailbox_email = fetch_gmail_mailbox_email(access_token)
+    except GoogleOAuthExchangeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    effective_client_name = (str(state_payload.get("client_name") or "") or mailbox_email).strip() or mailbox_email
+    effective_processed_label = (
+        str(state_payload.get("processed_label") or DEFAULT_PROCESSED_LABEL).strip() or DEFAULT_PROCESSED_LABEL
+    )
+    effective_skipped_label = (
+        str(state_payload.get("skipped_label") or DEFAULT_SKIPPED_LABEL).strip() or DEFAULT_SKIPPED_LABEL
+    )
+
+    try:
+        upsert_result = upsert_gmail_mailbox_oauth(
+            client_name=effective_client_name,
+            mailbox_email=mailbox_email,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_expiry=token_expiry,
+            scopes=scopes,
+            processed_label=effective_processed_label,
+            skipped_label=effective_skipped_label,
+            active=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to persist Gmail mailbox: {exc}")
+
+    created = bool(upsert_result.get("created"))
+    return {
+        "status": "connected",
+        "mailbox_id": upsert_result.get("id"),
+        "mailbox_email": upsert_result.get("mailbox_email"),
+        "active": bool(upsert_result.get("active")),
+        "connection_result": "created" if created else "updated_existing",
+        "duplicate_mailbox_connection": not created,
+        "scopes": scopes,
     }
 
 

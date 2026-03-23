@@ -146,6 +146,11 @@ Labels:
 * AI_PROCESSED
 * AI_SKIPPED
 
+Google OAuth mailbox connect endpoints:
+
+* `GET /auth/google/start` (returns authorization URL)
+* `GET /auth/google/callback` (handles code exchange and upserts `gmail_mailboxes`)
+
 ---
 
 ## 📊 Observability
@@ -220,9 +225,16 @@ OPENAI_API_KEY=your_api_key_here
 API_KEY=your_internal_api_key
 DEMO_API_KEY=your_internal_api_key
 
-# Optional: required when using DB-backed gmail_mailboxes tokens
+# Required for Google OAuth mailbox connection flow
 GOOGLE_CLIENT_ID=your_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
+GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/auth/google/callback
+
+# Optional
+# Comma or space-separated. Defaults to Gmail modify+compose scopes.
+GOOGLE_OAUTH_SCOPES=https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.compose
+# Optional custom state-signing secret (falls back to GOOGLE_CLIENT_SECRET)
+GOOGLE_OAUTH_STATE_SECRET=change_me
 ```
 
 Run backend:
@@ -235,6 +247,16 @@ Run Gmail worker:
 
 ```bash
 python scripts/worker_loop.py
+```
+
+Connect a Gmail mailbox via OAuth (backend-only):
+
+```bash
+# 1) Get authorization URL (requires API key)
+curl -H "X-API-Key: your_internal_api_key" "http://127.0.0.1:8000/auth/google/start"
+
+# 2) Open returned authorization_url in browser, complete consent.
+# 3) Google redirects to /auth/google/callback and mailbox is upserted into gmail_mailboxes.
 ```
 
 ---
