@@ -123,7 +123,7 @@ app/
     schema.sql
 
 scripts/
-  gmail_test.py    # Gmail worker
+  worker_loop.py   # Gmail worker (polling)
 ```
 
 ---
@@ -138,11 +138,13 @@ The system includes a Gmail worker that:
 * generates AI replies
 * creates draft replies in Gmail
 * labels processed emails
+* loads active Gmail mailbox connections from `gmail_mailboxes` (DB-backed foundation)
+* falls back to legacy single-mailbox `token.json` mode when no active DB mailbox is configured
 
 Labels:
 
-* AI Draft Ready
-* AI Skipped
+* AI_PROCESSED
+* AI_SKIPPED
 
 ---
 
@@ -216,6 +218,11 @@ Create `.env`:
 ```
 OPENAI_API_KEY=your_api_key_here
 API_KEY=your_internal_api_key
+DEMO_API_KEY=your_internal_api_key
+
+# Optional: required when using DB-backed gmail_mailboxes tokens
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
 ```
 
 Run backend:
@@ -227,7 +234,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 Run Gmail worker:
 
 ```bash
-python scripts/gmail_test.py
+python scripts/worker_loop.py
 ```
 
 ---

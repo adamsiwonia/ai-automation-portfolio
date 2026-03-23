@@ -36,3 +36,21 @@ CREATE TABLE IF NOT EXISTS api_key_usage_daily (
     count INTEGER NOT NULL DEFAULT 0,
     UNIQUE(key_hash, day)
 );
+
+CREATE TABLE IF NOT EXISTS gmail_mailboxes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_name TEXT NOT NULL,
+    mailbox_email TEXT NOT NULL,
+    access_token TEXT,
+    refresh_token TEXT,
+    token_expiry TEXT,
+    scopes TEXT NOT NULL DEFAULT '["https://www.googleapis.com/auth/gmail.modify","https://www.googleapis.com/auth/gmail.compose"]',
+    processed_label TEXT NOT NULL DEFAULT 'AI_PROCESSED',
+    skipped_label TEXT NOT NULL DEFAULT 'AI_SKIPPED',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gmail_mailboxes_email ON gmail_mailboxes(mailbox_email);
+CREATE INDEX IF NOT EXISTS idx_gmail_mailboxes_active ON gmail_mailboxes(active);
