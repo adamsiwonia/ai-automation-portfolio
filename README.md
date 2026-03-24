@@ -1,137 +1,166 @@
 # AI Automation & Data Analytics Portfolio
 
-Welcome to my portfolio 👋  
-This repository documents my practical journey toward becoming an **AI Automation Specialist & Data Analyst**.
+Public portfolio of practical projects in **AI automation, backend workflows, SQL analytics, and data analysis**.
 
-I focus on building **real-world, hands-on projects** that combine automation, data analysis, and AI — with an emphasis on business use cases rather than tutorials.
+I build tools that solve real business problems such as:
+
+- reducing repetitive customer support work,
+- preparing AI-generated draft replies,
+- automating outreach workflows,
+- transforming raw data into KPI-ready analytics.
+
+This repository is focused on **real-world use cases**, not tutorial-style toy projects.
 
 ---
 
-## 🧠 Tech Stack
+## Featured Projects
 
-- Python (pandas, numpy)
-- SQL
-- Data Analysis & Visualization
-- AI & LLMs
-- Automation workflows
-- APIs & integrations
-- Git & GitHub
+### 1) AI Email Support Assistant
+**Folder:** `projects/03-ai-support-agent`  
+**Live demo:** https://ai-automation-portfolio-tyou.onrender.com/demo
+
+A production-oriented AI support workflow that helps businesses handle repetitive customer emails faster.
+
+**What it does:**
+- classifies customer intent (shipping, returns, refunds, order status, etc.),
+- generates ready-to-review draft replies,
+- suggests the next internal step,
+- supports multilingual replies,
+- creates Gmail drafts instead of auto-sending,
+- logs requests for debugging, monitoring, and auditing.
+
+**Tech:** FastAPI, OpenAI API, SQLite, Gmail API, Pydantic
+
+**Why it matters:**  
+This project shows how AI can be used safely in a real support workflow while keeping a human in control through a **draft-first** approach.
+
+---
+
+### 2) Outreach Assistant
+**Folder:** `projects/03.5-outreach-assistant`
+
+A draft-first outreach automation system that imports leads from Google Sheets, processes them locally in SQLite, prepares outreach drafts, handles duplicate detection, and syncs results back into the sheet.
+
+**What it does:**
+- imports leads from Google Sheets,
+- classifies rows into outreach-ready / follow-up / review states,
+- generates Gmail drafts only (no auto-send),
+- detects hard and soft duplicates,
+- preserves human notes and responses,
+- syncs assistant outputs back to the sheet.
+
+**Tech:** Python, SQLite, Google Sheets API, Gmail API, pytest
+
+**Why it matters:**  
+This project is close to a real sales operations workflow. It focuses on speed, control, and safety rather than blind automation.
+
+---
+
+### 3) SQL Sales Dashboard Backend
+**Folder:** `projects/02-sql-dashboard`
+
+A SQL analytics backend built on the Brazilian E-Commerce Public Dataset by Olist.
+
+**What it includes:**
+- relational PostgreSQL schema,
+- SQL views for analytics and BI-style reporting,
+- KPI queries for revenue trends and AOV,
+- sample outputs and schema diagram.
+
+**Key business outputs:**
+- daily and monthly revenue trends,
+- top revenue days,
+- average order value analysis,
+- dashboard-ready semantic layer.
+
+**Tech:** SQL, PostgreSQL, data modeling
+
+---
+
+### 4) Email Automation
+**Folder:** `projects/01-email-automation`
+
+A Python-based email automation project focused on structured processing and automation-ready outputs.
+
+**What it demonstrates:**
+- email workflow automation,
+- structured data extraction,
+- secure config with environment variables,
+- clean project organization for reusable automation logic.
+
+**Tech:** Python, SMTP, `.env` configuration
+
+---
+
+### 5) Data Analytics Notebooks
+**Folder:** `projects/04-data-analytics`
+
+A structured analytics project built around business-oriented analysis in Jupyter notebooks.
+
+**What it includes:**
+- data exploration and cleaning,
+- filtering, groupby, and pivot tables,
+- business insights and executive-style conclusions,
+- notebook-based storytelling with analysis.
+
+**Tech:** Python, pandas, numpy, Jupyter
+
+---
+
+## Tech Stack
+
+- Python
+- FastAPI
+- SQL / PostgreSQL / SQLite
+- pandas / numpy
 - Jupyter Notebooks
+- OpenAI API / LLM workflows
+- Gmail API / Google Sheets API
+- Automation workflows
+- Git / GitHub
 - Make.com / Zapier
 
 ---
 
-## 📂 Projects
+## What This Portfolio Shows
 
-### 🔹 01. Email Automation
-**Folder:** `projects/01-email-automation`
+This repository documents my progress toward becoming an **AI Automation Specialist & Data Analyst** by building practical, portfolio-ready systems.
 
-An automated email processing system built with Python.
+Across these projects, I focus on:
 
-**What it does:**
-- Reads incoming emails via SMTP
-- Extracts structured data from email content
-- Prepares data for further automation (e.g. Google Sheets, CRM)
-- Secure configuration using `.env`
-
-**Key skills demonstrated:**
-- Python scripting
-- Email protocols (SMTP)
-- Environment variables
-- Automation logic
-- Clean project structure
+- backend-first AI workflows,
+- business process automation,
+- draft-first human-in-the-loop systems,
+- analytics-ready data modeling,
+- turning raw inputs into usable business outputs.
 
 ---
 
-### 🔹 02. SQL Sales Dashboard
-**Folder:** `projects/02-sql-dashboard`
+## Current Focus
 
-A **SQL-based analytical backend** built on the Brazilian E-Commerce Public Dataset by Olist.
+My strongest current direction is building **AI-powered workflow tools for small businesses**, especially in areas like:
 
-The project transforms raw transactional data into an **analytics-ready PostgreSQL database** and provides a **semantic layer (SQL views)** to support business KPIs.
-
-**What it includes:**
-- Relational database schema with PK/FK and indexes
-- Analytical SQL views for revenue analysis
-- Executive KPI queries
-- ERD diagram and sample analytical outputs
-
-**Key outputs:**
-- Daily and monthly revenue trends
-- Average Order Value (AOV)
-- Top revenue days
-- KPI-ready SQL for BI tools
-
-**Key skills demonstrated:**
-- SQL (joins, aggregations, views)
-- Data modeling & schema design
-- Business-oriented analytics
-- Dashboard-ready data preparation
+- customer support automation,
+- outreach workflow automation,
+- internal productivity tools,
+- data-backed operational reporting.
 
 ---
 
-### 🔹 03. AI Customer Support Agent  
-**Folder:** `projects/03-ai-support-agent`
+## About Me
 
-A production-oriented AI-powered backend that classifies and generates structured responses to customer inquiries.
+I am building this portfolio in public to demonstrate practical, job-ready and client-ready skills in:
 
-The system uses the OpenAI API to:
-- Classify customer intent (RETURN, REFUND, SHIPPING, etc.)
-- Generate professional responses
-- Return structured JSON output
-- Log results for further processing
+- AI automation,
+- backend workflows,
+- applied analytics,
+- business-focused problem solving.
 
-This project focuses on building a scalable backend architecture for real-world business automation use cases.
-
-**Key skills demonstrated:**
-- LLM API integration
-- Prompt engineering
-- Structured JSON validation
-- Error handling
-- Secure environment configuration
-- Backend-first system design
----
-
-### 🔹 04. Data Analytics
-**Folder:** `projects/04-data-analytics`
-
-A structured data analytics project based on business-oriented questions.
-
-**What it includes:**
-- Data exploration & cleaning
-- Aggregations, groupby, pivot tables
-- Customer segmentation
-- Business insights & conclusions
-- Clear narrative in Jupyter Notebooks
-
-**Key skills demonstrated:**
-- pandas & numpy
-- Analytical thinking
-- Translating data → business value
-- Notebook organization & documentation
-
+My goal is to help businesses save time, reduce repetitive work, and use AI in ways that are practical, controlled, and useful.
 
 ---
 
-## 🧭 Learning Focus
+## Contact
 
-- Python for automation and analysis  
-- SQL for business analytics  
-- Data-driven decision making  
-- AI-powered workflows  
-- Practical automation projects  
-
----
-
-## 🧑‍💻 About Me
-
-Aspiring **AI Automation Specialist & Data Analyst** building a public portfolio to demonstrate job-ready skills.
-
-My goal is to help businesses automate repetitive tasks, analyze data effectively, and leverage AI in practical ways.
-
----
-
-## 📬 Contact
-
-- LinkedIn: https://www.linkedin.com/in/adam-siwonia-059bb03a0  
-- Email: adam.pawel.siwonia@gmail.com
+- **LinkedIn:** https://www.linkedin.com/in/adam-siwonia-059bb03a0
+- **Email:** adam.pawel.siwonia@gmail.com
