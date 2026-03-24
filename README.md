@@ -19,6 +19,8 @@ This repository is focused on **real-world use cases**, not tutorial-style toy p
 **Folder:** `projects/03-ai-support-agent`  
 **Live demo:** https://ai-automation-portfolio-tyou.onrender.com/demo
 
+![alt text](image.png)
+
 A production-oriented AI support workflow that helps businesses handle repetitive customer emails faster.
 
 **What it does:**
