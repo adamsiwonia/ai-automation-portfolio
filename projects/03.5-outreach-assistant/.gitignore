@@ -1,0 +1,15 @@
+﻿__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite
+*.sqlite3
+.env
+token.json
+AGENTS.md
+credentials.json
+gmail_oauth_client.json
+gmail_token.json
+pytest-cache-files-*/
