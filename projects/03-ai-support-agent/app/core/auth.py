@@ -25,8 +25,8 @@ def _extract_api_key(x_api_key: str | None, authorization: str | None) -> str | 
 
 def _auth_via_demo_key(api_key: str, request: Request) -> dict[str, Any] | None:
     """Stateless fallback for demo/local mode via env keys."""
-    demo_key = os.getenv("DEMO_API_KEY")
-    legacy_key = os.getenv("API_KEY")
+    demo_key = (os.getenv("DEMO_API_KEY") or "").strip() or None
+    legacy_key = (os.getenv("API_KEY") or "").strip() or None
     print("DEBUG auth -> DEMO_API_KEY loaded:", bool(demo_key))
     print("DEBUG auth -> API_KEY loaded:", bool(legacy_key))
 
