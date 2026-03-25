@@ -13,3 +13,6 @@ credentials.json
 gmail_oauth_client.json
 gmail_token.json
 pytest-cache-files-*/
+projects/03.5-outreach-assistant/google_credentials.json
+projects/03.5-outreach-assistant/tests/.pytest_tmp/
+projects/03.5-outreach-assistant/tests/tmp_config_*/

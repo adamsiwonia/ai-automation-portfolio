@@ -13,10 +13,10 @@ Draft-first outreach assistant that imports leads from Google Sheets into SQLite
 
 ### Import mapping
 
-- `Firma` -> `company_name`
+- `Company` -> `company_name` (backward compatible with `Firma`)
 - `Email` -> raw contact value (parsed into valid email / contact form / malformed)
 - `Date Sent` -> `last_contacted_at`
-- `Follow-up Date` -> `follow_up_due_at`
+- `Follow Up Date` -> `follow_up_due_at` (backward compatible with `Follow-up Date`)
 - `Response` -> `human_response` (preserved, never overwritten)
 - `Notes` -> `notes` (preserved, never overwritten)
 - `Segment` -> lead category source of truth
@@ -48,10 +48,9 @@ The assistant does not write to `Response` or `Notes`.
 - Email is URL/contact form -> `CONTACT_FORM_REVIEW`
 - Email malformed -> `EMAIL_NEEDS_REVIEW`
 - `Date Sent` empty -> `FIRST_TOUCH_READY`
-- `Date Sent` present and `Follow-up Date` empty -> `FOLLOW_UP_READY`
-- `Follow-up Date` equals today -> `FOLLOW_UP_READY`
-- `Follow-up Date` before today -> `FOLLOW_UP_SKIPPED` (no draft generated)
-- `Follow-up Date` after today -> `DONE`
+- `Date Sent` present and `Follow Up Date` equals today -> `FOLLOW_UP_READY`
+- `Follow Up Date` empty -> `DONE` (no follow-up draft)
+- `Follow Up Date` not today -> `DONE` (no follow-up draft)
 
 ### Duplicate Handling
 
@@ -126,6 +125,12 @@ pip install -r requirements.txt
 The assistant only creates Gmail drafts and never sends emails automatically.
 
 ## Run Commands
+
+Validate local config:
+
+```bash
+python scripts/check_config.py
+```
 
 Initialize DB schema:
 

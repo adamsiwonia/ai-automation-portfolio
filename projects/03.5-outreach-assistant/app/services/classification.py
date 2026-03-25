@@ -57,25 +57,20 @@ def classify_lead(
     follow_up_raw = (follow_up_due_at or "").strip()
     if not follow_up_raw:
         return (
-            LeadClassification.FOLLOW_UP_READY,
-            "Follow-up triggered by empty manual Follow-up Date.",
+            LeadClassification.DONE,
+            "Follow-up skipped because Follow Up Date is empty.",
         )
 
     follow_up_due = _parse_dt(follow_up_due_at)
     if not follow_up_due:
         return (
             LeadClassification.DONE,
-            "Manual Follow-up Date is invalid or unrecognized.",
+            "Follow Up Date is invalid or unrecognized.",
         )
 
     if follow_up_due.date() == current_time.date():
         return (
             LeadClassification.FOLLOW_UP_READY,
-            "Follow-up triggered by manual Follow-up Date set to today.",
+            "Follow-up triggered because Follow Up Date is today.",
         )
-    if follow_up_due.date() < current_time.date():
-        return (
-            LeadClassification.FOLLOW_UP_SKIPPED,
-            "Follow-up skipped because manual Follow-up Date is in the past.",
-        )
-    return LeadClassification.DONE, "Waiting for manual Follow-up Date."
+    return LeadClassification.DONE, "Follow-up skipped because Follow Up Date is not today."

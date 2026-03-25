@@ -3,11 +3,14 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(PROJECT_ROOT / ".env")
+ENV_PATH = PROJECT_ROOT / ".env"
+load_dotenv(ENV_PATH)
+_DOTENV_VALUES = dotenv_values(ENV_PATH)
 
 
 @dataclass(frozen=True)
@@ -46,74 +49,217 @@ class Settings:
 
     @property
     def google_ready(self) -> bool:
+        spreadsheet_id = (self.google_spreadsheet_id or "").strip()
         return bool(
-            self.google_spreadsheet_id
+            spreadsheet_id
             and self.google_credentials_path
             and self.google_credentials_path.exists()
         )
 
 
+@dataclass(frozen=True)
+class ValidationResult:
+    ok: bool
+    errors: list[str]
+    warnings: list[str]
+
+    def format_errors(self) -> str:
+        return "\n".join(f"- {error}" for error in self.errors)
+
+
+def _env_raw(name: str) -> tuple[str | None, str | None, Literal["missing", "empty", "set"]]:
+    if name in os.environ:
+        raw = os.environ.get(name)
+        value = str(raw) if raw is not None else ""
+        trimmed = value.strip()
+        return "environment", trimmed, "set" if trimmed else "empty"
+
+    if name in _DOTENV_VALUES:
+        raw = _DOTENV_VALUES.get(name)
+        value = str(raw) if raw is not None else ""
+        trimmed = value.strip()
+        return ".env", trimmed, "set" if trimmed else "empty"
+
+    return None, None, "missing"
+
+
+def _read_env(name: str, default: str | None = None) -> str | None:
+    _, value, state = _env_raw(name)
+    if state == "set":
+        return value
+
+    if default is None:
+        return None
+    return str(default).strip()
+
+
+def _resolve_path(raw_value: str | None) -> Path | None:
+    if not raw_value:
+        return None
+
+    value = raw_value.strip().strip('"').strip("'")
+    if not value:
+        return None
+
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = PROJECT_ROOT / candidate
+    return candidate
+
+
+def validate_sheets_config(settings: Settings | None = None) -> ValidationResult:
+    resolved = settings or get_settings()
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    _, sheet_id_value, sheet_id_state = _env_raw("GOOGLE_SPREADSHEET_ID")
+    if sheet_id_state == "missing":
+        errors.append("GOOGLE_SPREADSHEET_ID is missing.")
+    elif sheet_id_state == "empty":
+        errors.append("GOOGLE_SPREADSHEET_ID is empty.")
+    elif not sheet_id_value:
+        errors.append("GOOGLE_SPREADSHEET_ID could not be resolved.")
+
+    creds_source, creds_raw_value, creds_state = _env_raw("GOOGLE_APPLICATION_CREDENTIALS")
+    if creds_state == "missing":
+        errors.append("GOOGLE_APPLICATION_CREDENTIALS is missing.")
+    elif creds_state == "empty":
+        errors.append("GOOGLE_APPLICATION_CREDENTIALS is empty.")
+    else:
+        creds_path = resolved.google_credentials_path
+        if not creds_path:
+            errors.append("GOOGLE_APPLICATION_CREDENTIALS could not be resolved to a file path.")
+        elif not creds_path.exists():
+            source_label = creds_source or "environment"
+            errors.append(
+                "GOOGLE_APPLICATION_CREDENTIALS points to a file that does not exist: "
+                f"{creds_path} (from {source_label}: {creds_raw_value})"
+            )
+        elif not creds_path.is_file():
+            errors.append(
+                f"GOOGLE_APPLICATION_CREDENTIALS is not a file path: {creds_path}"
+            )
+
+    return ValidationResult(ok=not errors, errors=errors, warnings=warnings)
+
+
+def validate_gmail_config(settings: Settings | None = None) -> ValidationResult:
+    resolved = settings or get_settings()
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    secrets_source, secrets_raw_value, secrets_state = _env_raw("GMAIL_OAUTH_CLIENT_SECRETS")
+    if secrets_state == "missing":
+        errors.append("GMAIL_OAUTH_CLIENT_SECRETS is missing.")
+    elif secrets_state == "empty":
+        errors.append("GMAIL_OAUTH_CLIENT_SECRETS is empty.")
+    else:
+        secrets_path = resolved.gmail_oauth_client_secrets_path
+        if not secrets_path:
+            errors.append("GMAIL_OAUTH_CLIENT_SECRETS could not be resolved to a file path.")
+        elif not secrets_path.exists():
+            source_label = secrets_source or "environment"
+            errors.append(
+                "GMAIL_OAUTH_CLIENT_SECRETS points to a file that does not exist: "
+                f"{secrets_path} (from {source_label}: {secrets_raw_value})"
+            )
+        elif not secrets_path.is_file():
+            errors.append(f"GMAIL_OAUTH_CLIENT_SECRETS is not a file path: {secrets_path}")
+
+    _, token_value, token_state = _env_raw("GMAIL_TOKEN_PATH")
+    if token_state == "missing":
+        warnings.append(
+            "GMAIL_TOKEN_PATH is missing; default token path under project root will be used."
+        )
+    elif token_state == "empty":
+        warnings.append(
+            "GMAIL_TOKEN_PATH is empty; default token path under project root will be used."
+        )
+    elif not token_value:
+        warnings.append("GMAIL_TOKEN_PATH could not be resolved; default token path will be used.")
+
+    return ValidationResult(ok=not errors, errors=errors, warnings=warnings)
+
+
 def get_settings() -> Settings:
     db_default = PROJECT_ROOT / "app" / "database" / "outreach_assistant.sqlite"
-    db_path = Path(os.getenv("DB_PATH", str(db_default))).expanduser()
+    db_path = _resolve_path(_read_env("DB_PATH", str(db_default))) or db_default
 
-    creds_raw = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    creds_path = Path(creds_raw).expanduser() if creds_raw else None
-    gmail_secrets_raw = os.getenv("GMAIL_OAUTH_CLIENT_SECRETS")
-    gmail_secrets_path = Path(gmail_secrets_raw).expanduser() if gmail_secrets_raw else None
+    creds_path = _resolve_path(_read_env("GOOGLE_APPLICATION_CREDENTIALS"))
+    gmail_secrets_path = _resolve_path(_read_env("GMAIL_OAUTH_CLIENT_SECRETS"))
     gmail_token_default = PROJECT_ROOT / "token_gmail.json"
-    gmail_token_path = Path(
-        os.getenv("GMAIL_TOKEN_PATH", str(gmail_token_default))
-    ).expanduser()
+    gmail_token_path = (
+        _resolve_path(_read_env("GMAIL_TOKEN_PATH", str(gmail_token_default)))
+        or gmail_token_default
+    )
 
     return Settings(
         db_path=db_path,
         google_credentials_path=creds_path,
-        google_spreadsheet_id=os.getenv("GOOGLE_SPREADSHEET_ID"),
-        google_sheet_name=os.getenv("GOOGLE_SHEET_NAME", "Leads"),
+        google_spreadsheet_id=_read_env("GOOGLE_SPREADSHEET_ID"),
+        google_sheet_name=_read_env("GOOGLE_SHEET_NAME", "Leads") or "Leads",
         gmail_oauth_client_secrets_path=gmail_secrets_path,
         gmail_token_path=gmail_token_path,
-        external_id_column=os.getenv("SHEET_EXTERNAL_ID_COLUMN", ""),
-        company_column=os.getenv("SHEET_COMPANY_COLUMN", "Firma"),
-        website_column=os.getenv("SHEET_WEBSITE_COLUMN", ""),
-        contact_name_column=os.getenv("SHEET_CONTACT_NAME_COLUMN", ""),
-        contact_value_column=os.getenv("SHEET_CONTACT_VALUE_COLUMN", "Email"),
-        assistant_status_column=os.getenv("SHEET_ASSISTANT_STATUS_COLUMN", "Assistant Status"),
-        response_column=os.getenv("SHEET_RESPONSE_COLUMN", "Response"),
-        notes_column=os.getenv("SHEET_NOTES_COLUMN", "Notes"),
-        segment_column=os.getenv("SHEET_SEGMENT_COLUMN", "Segment"),
-        last_contacted_column=os.getenv("SHEET_LAST_CONTACTED_COLUMN", "Date Sent"),
-        follow_up_due_column=os.getenv("SHEET_FOLLOW_UP_DUE_COLUMN", "Follow-up Date"),
-        sync_lead_type_column=os.getenv("SHEET_SYNC_LEAD_TYPE_COLUMN", "Lead Type"),
-        sync_assistant_status_column=os.getenv(
+        external_id_column=_read_env("SHEET_EXTERNAL_ID_COLUMN", "") or "",
+        company_column=_read_env("SHEET_COMPANY_COLUMN", "Company") or "Company",
+        website_column=_read_env("SHEET_WEBSITE_COLUMN", "") or "",
+        contact_name_column=_read_env("SHEET_CONTACT_NAME_COLUMN", "") or "",
+        contact_value_column=_read_env("SHEET_CONTACT_VALUE_COLUMN", "Email") or "Email",
+        assistant_status_column=_read_env("SHEET_ASSISTANT_STATUS_COLUMN", "Assistant Status")
+        or "Assistant Status",
+        response_column=_read_env("SHEET_RESPONSE_COLUMN", "Response") or "Response",
+        notes_column=_read_env("SHEET_NOTES_COLUMN", "Notes") or "Notes",
+        segment_column=_read_env("SHEET_SEGMENT_COLUMN", "Segment") or "Segment",
+        last_contacted_column=_read_env("SHEET_LAST_CONTACTED_COLUMN", "Date Sent")
+        or "Date Sent",
+        follow_up_due_column=_read_env("SHEET_FOLLOW_UP_DUE_COLUMN", "Follow Up Date")
+        or "Follow Up Date",
+        sync_lead_type_column=_read_env("SHEET_SYNC_LEAD_TYPE_COLUMN", "Lead Type")
+        or "Lead Type",
+        sync_assistant_status_column=_read_env(
             "SHEET_SYNC_ASSISTANT_STATUS_COLUMN", "Assistant Status"
-        ),
-        sync_selected_contact_column=os.getenv(
+        )
+        or "Assistant Status",
+        sync_selected_contact_column=_read_env(
             "SHEET_SYNC_SELECTED_CONTACT_COLUMN", "Selected Contact"
-        ),
-        sync_draft_type_column=os.getenv("SHEET_SYNC_DRAFT_TYPE_COLUMN", "Draft Type"),
-        sync_draft_subject_column=os.getenv("SHEET_SYNC_DRAFT_SUBJECT_COLUMN", "Draft Subject"),
-        sync_draft_body_column=os.getenv("SHEET_SYNC_DRAFT_BODY_COLUMN", "Draft Body"),
-        sync_personalization_note_column=os.getenv(
+        )
+        or "Selected Contact",
+        sync_draft_type_column=_read_env("SHEET_SYNC_DRAFT_TYPE_COLUMN", "Draft Type")
+        or "Draft Type",
+        sync_draft_subject_column=_read_env(
+            "SHEET_SYNC_DRAFT_SUBJECT_COLUMN", "Draft Subject"
+        )
+        or "Draft Subject",
+        sync_draft_body_column=_read_env("SHEET_SYNC_DRAFT_BODY_COLUMN", "Draft Body")
+        or "Draft Body",
+        sync_personalization_note_column=_read_env(
             "SHEET_SYNC_PERSONALIZATION_NOTE_COLUMN", "Personalization Note"
-        ),
-        sync_last_processed_at_column=os.getenv(
+        )
+        or "Personalization Note",
+        sync_last_processed_at_column=_read_env(
             "SHEET_SYNC_LAST_PROCESSED_AT_COLUMN", "Last Processed At"
-        ),
-        sync_error_flag_column=os.getenv("SHEET_SYNC_ERROR_FLAG_COLUMN", "Error Flag"),
-        sync_gmail_marker_column=os.getenv(
+        )
+        or "Last Processed At",
+        sync_error_flag_column=_read_env("SHEET_SYNC_ERROR_FLAG_COLUMN", "Error Flag")
+        or "Error Flag",
+        sync_gmail_marker_column=_read_env(
             "SHEET_SYNC_GMAIL_MARKER_COLUMN", "Gmail Draft Status"
-        ),
-        sync_duplicate_flag_column=os.getenv(
+        )
+        or "Gmail Draft Status",
+        sync_duplicate_flag_column=_read_env(
             "SHEET_SYNC_DUPLICATE_FLAG_COLUMN", "Duplicate Flag"
-        ),
-        sync_duplicate_type_column=os.getenv(
+        )
+        or "Duplicate Flag",
+        sync_duplicate_type_column=_read_env(
             "SHEET_SYNC_DUPLICATE_TYPE_COLUMN", "Duplicate Type"
-        ),
-        sync_duplicate_of_column=os.getenv(
+        )
+        or "Duplicate Type",
+        sync_duplicate_of_column=_read_env(
             "SHEET_SYNC_DUPLICATE_OF_COLUMN", "Duplicate Of"
-        ),
-        sync_duplicate_reason_column=os.getenv(
+        )
+        or "Duplicate Of",
+        sync_duplicate_reason_column=_read_env(
             "SHEET_SYNC_DUPLICATE_REASON_COLUMN", "Duplicate Reason"
-        ),
+        )
+        or "Duplicate Reason",
     )

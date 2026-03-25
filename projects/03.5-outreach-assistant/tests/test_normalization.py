@@ -20,7 +20,7 @@ def _settings() -> Settings:
         gmail_oauth_client_secrets_path=None,
         gmail_token_path=Path("token_gmail_test.json"),
         external_id_column="Lead ID",
-        company_column="Firma",
+        company_column="Company",
         website_column="Website",
         contact_name_column="",
         contact_value_column="Email",
@@ -29,7 +29,7 @@ def _settings() -> Settings:
         notes_column="Notes",
         segment_column="Segment",
         last_contacted_column="Date Sent",
-        follow_up_due_column="Follow-up Date",
+        follow_up_due_column="Follow Up Date",
         sync_lead_type_column="Lead Type",
         sync_assistant_status_column="Assistant Status",
         sync_selected_contact_column="Selected Contact",
@@ -74,7 +74,7 @@ def test_parse_contact_value_malformed_email() -> None:
 def test_normalize_sheet_row_uses_column_mapping() -> None:
     row = {
         "Lead ID": "L-100",
-        "Firma": "Northwind",
+        "Company": "Northwind",
         "Website": "northwind.com",
         "Email": "alex@northwind.com",
         "Assistant Status": "new",
@@ -82,7 +82,7 @@ def test_normalize_sheet_row_uses_column_mapping() -> None:
         "Notes": "Interested in outbound automation",
         "Segment": "Ecommerce",
         "Date Sent": "",
-        "Follow-up Date": "",
+        "Follow Up Date": "",
     }
     normalized = normalize_sheet_row(
         row,
@@ -109,3 +109,23 @@ def test_normalize_segment_common_dirty_values() -> None:
 def test_normalize_segment_unknown_to_other() -> None:
     assert normalize_segment("Ecommerce") == "other"
     assert normalize_segment("   ") == "other"
+
+
+def test_normalize_sheet_row_company_falls_back_to_firma() -> None:
+    row = {
+        "Firma": "Legacy Company Header",
+        "Email": "alex@legacy.example",
+        "Assistant Status": "",
+        "Response": "",
+        "Notes": "",
+        "Segment": "",
+        "Date Sent": "",
+        "Follow-up Date": "",
+    }
+    normalized = normalize_sheet_row(
+        row,
+        settings=_settings(),
+        source_sheet="Leads",
+        source_row_number=2,
+    )
+    assert normalized.company_name == "Legacy Company Header"

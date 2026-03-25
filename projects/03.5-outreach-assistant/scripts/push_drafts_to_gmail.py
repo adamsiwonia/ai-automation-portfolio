@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.core.config import get_settings
+from app.core.config import get_settings, validate_gmail_config, validate_sheets_config
 from app.database.db import get_conn, init_db
 from app.repositories.leads import list_gmail_draft_candidates, mark_gmail_draft_created
 from app.services.gmail import GmailDraftPayload, create_gmail_draft, get_gmail_service
@@ -55,10 +55,25 @@ def main() -> None:
     settings = get_settings()
     init_db(settings.db_path)
 
-    if args.sync_marker and not settings.google_ready:
+    gmail_validation = validate_gmail_config(settings)
+    if not gmail_validation.ok:
         raise SystemExit(
-            "Google Sheets marker sync requested, but Sheets credentials are missing."
+            "Gmail configuration is invalid:\n"
+            f"{gmail_validation.format_errors()}"
         )
+    for warning in gmail_validation.warnings:
+        print(f"Warning: {warning}")
+
+    sync_marker_enabled = bool(args.sync_marker)
+    if sync_marker_enabled:
+        sheets_validation = validate_sheets_config(settings)
+        if not sheets_validation.ok:
+            print(
+                "Warning: Google Sheets marker sync requested, but Sheets config is invalid. "
+                "Draft creation will continue without marker sync."
+            )
+            print(sheets_validation.format_errors())
+            sync_marker_enabled = False
 
     with get_conn(settings.db_path) as conn:
         candidates = list_gmail_draft_candidates(
@@ -96,7 +111,7 @@ def main() -> None:
             )
             created += 1
 
-            if args.sync_marker:
+            if sync_marker_enabled:
                 marker_updates.append(
                     SheetRowUpdate(
                         row_number=candidate.source_row_number,
@@ -107,7 +122,7 @@ def main() -> None:
         conn.commit()
 
     marker_cells = 0
-    if args.sync_marker and marker_updates:
+    if sync_marker_enabled and marker_updates:
         sheets_client = GoogleSheetsClient(settings)
         marker_cells = sheets_client.batch_update_rows(
             updates=marker_updates,
@@ -118,7 +133,7 @@ def main() -> None:
     print(f"Candidates evaluated: {len(candidates)}")
     print(f"Drafts created: {created}")
     print(f"Skipped invalid recipients: {skipped_invalid_recipient}")
-    if args.sync_marker:
+    if sync_marker_enabled:
         print(f"Sheet marker updates: {len(marker_updates)} rows, {marker_cells} cells")
 
 

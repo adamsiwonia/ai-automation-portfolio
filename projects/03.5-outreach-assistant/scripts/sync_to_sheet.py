@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.core.config import get_settings
+from app.core.config import get_settings, validate_sheets_config
 from app.database.db import get_conn
 from app.repositories.leads import list_sync_candidates
 from app.services.pipeline import sync_outputs_to_sheet
@@ -38,9 +38,16 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    if not settings.google_ready and not args.dry_run:
+    sheets_validation = validate_sheets_config(settings)
+    if args.dry_run and not sheets_validation.ok:
+        print(
+            "Warning: Google Sheets config is invalid, but --dry-run can continue.\n"
+            f"{sheets_validation.format_errors()}"
+        )
+    elif not args.dry_run and not sheets_validation.ok:
         raise SystemExit(
-            "Google Sheets is not configured. Check GOOGLE_APPLICATION_CREDENTIALS and GOOGLE_SPREADSHEET_ID."
+            "Google Sheets is not configured:\n"
+            f"{sheets_validation.format_errors()}"
         )
 
     only_selected = not args.all

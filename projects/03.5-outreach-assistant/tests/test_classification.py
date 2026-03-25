@@ -68,8 +68,8 @@ def test_follow_up_ready_when_follow_up_date_empty() -> None:
         last_contacted_at="2026-03-10T09:00:00Z",
         follow_up_due_at="",
     )
-    assert classification == LeadClassification.FOLLOW_UP_READY
-    assert "empty manual Follow-up Date" in reason
+    assert classification == LeadClassification.DONE
+    assert "Follow Up Date is empty" in reason
 
 
 def test_follow_up_ready_when_follow_up_date_is_today() -> None:
@@ -85,10 +85,10 @@ def test_follow_up_ready_when_follow_up_date_is_today() -> None:
         now=now,
     )
     assert classification == LeadClassification.FOLLOW_UP_READY
-    assert "set to today" in reason
+    assert "is today" in reason
 
 
-def test_follow_up_skipped_when_follow_up_date_in_past() -> None:
+def test_done_when_follow_up_date_in_past() -> None:
     now = datetime(2026, 3, 24, 12, 0, tzinfo=timezone.utc)
     classification, reason = classify_lead(
         source_status="",
@@ -100,8 +100,8 @@ def test_follow_up_skipped_when_follow_up_date_in_past() -> None:
         follow_up_due_at="2026-03-20",
         now=now,
     )
-    assert classification == LeadClassification.FOLLOW_UP_SKIPPED
-    assert "in the past" in reason
+    assert classification == LeadClassification.DONE
+    assert "not today" in reason
 
 
 def test_done_when_follow_up_date_in_future() -> None:
@@ -117,4 +117,4 @@ def test_done_when_follow_up_date_in_future() -> None:
         now=now,
     )
     assert classification == LeadClassification.DONE
-    assert "Waiting for manual Follow-up Date" in reason
+    assert "not today" in reason

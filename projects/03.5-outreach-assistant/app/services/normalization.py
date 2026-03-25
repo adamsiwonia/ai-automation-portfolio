@@ -198,15 +198,27 @@ def normalize_segment(raw_value: str | None) -> str:
     return SEGMENT_MAP.get(normalized, "other")
 
 
-def _get_row_value(row: Mapping[str, object], column_name: str) -> str | None:
+def _get_row_value(
+    row: Mapping[str, object],
+    column_name: str,
+    aliases: tuple[str, ...] = (),
+) -> str | None:
     if not column_name:
-        return None
+        column_candidates: list[str] = [*aliases]
+    else:
+        column_candidates = [column_name, *aliases]
 
-    if column_name in row:
-        return normalize_text(row[column_name])
+    for candidate in column_candidates:
+        if candidate in row:
+            return normalize_text(row[candidate])
 
     lowered = {str(k).strip().lower(): v for k, v in row.items()}
-    return normalize_text(lowered.get(column_name.strip().lower()))
+    for candidate in column_candidates:
+        value = lowered.get(candidate.strip().lower())
+        normalized = normalize_text(value)
+        if normalized is not None:
+            return normalized
+    return None
 
 
 def normalize_sheet_row(
@@ -219,7 +231,11 @@ def normalize_sheet_row(
     contact_raw = _get_row_value(row, settings.contact_value_column)
     parsed_contact = parse_contact_value(contact_raw)
 
-    company = _get_row_value(row, settings.company_column) or "Unknown Company"
+    company = _get_row_value(
+        row,
+        settings.company_column,
+        aliases=("Company", "Firma"),
+    ) or "Unknown Company"
 
     return NormalizedLeadRow(
         source_sheet=source_sheet,
@@ -240,5 +256,11 @@ def normalize_sheet_row(
         last_contacted_at=normalize_datetime(
             _get_row_value(row, settings.last_contacted_column)
         ),
-        follow_up_due_at=normalize_datetime(_get_row_value(row, settings.follow_up_due_column)),
+        follow_up_due_at=normalize_datetime(
+            _get_row_value(
+                row,
+                settings.follow_up_due_column,
+                aliases=("Follow Up Date", "Follow-up Date"),
+            )
+        ),
     )

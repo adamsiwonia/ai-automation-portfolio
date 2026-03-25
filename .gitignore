@@ -30,3 +30,6 @@ logs/
 credentials.json
 token.json
 AGENTS.md
+projects/03.5-outreach-assistant/google_credentials.json
+projects/03.5-outreach-assistant/tests/.pytest_tmp/
+projects/03.5-outreach-assistant/tests/tmp_config_*/
