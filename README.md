@@ -20,7 +20,7 @@ This repository is focused on **real-world use cases**, not tutorial-style toy p
 **Live demo:** https://ai-automation-portfolio-tyou.onrender.com/demo
 *Note: this demo is hosted on Render free infrastructure, so the first request may take a few seconds while the service wakes up.*
 
-![image.png](image.png)
+![alt text](image.png)
 
 A production-oriented AI support workflow that helps businesses handle repetitive customer emails faster.
 

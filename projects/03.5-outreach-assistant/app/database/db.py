@@ -38,6 +38,7 @@ def init_db(db_path: Path | None = None) -> None:
         _ensure_leads_columns(conn)
         _ensure_outreach_items_classification_values(conn)
         _ensure_outreach_items_columns(conn)
+        _backfill_gmail_draft_for_draft_id(conn)
         conn.commit()
 
 
@@ -50,6 +51,8 @@ def _ensure_leads_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE leads ADD COLUMN segment TEXT")
     if "human_response" not in columns:
         conn.execute("ALTER TABLE leads ADD COLUMN human_response TEXT")
+    if "angle" not in columns:
+        conn.execute("ALTER TABLE leads ADD COLUMN angle TEXT")
 
 
 def _ensure_outreach_items_classification_values(conn: sqlite3.Connection) -> None:
@@ -93,10 +96,16 @@ def _ensure_outreach_items_classification_values(conn: sqlite3.Connection) -> No
             CHECK (duplicate_type IN ('HARD', 'SOFT') OR duplicate_type IS NULL),
           duplicate_of_lead_id INTEGER,
           duplicate_reason TEXT,
+          template_variant TEXT,
+          opener_variant TEXT,
+          personalization_used INTEGER NOT NULL DEFAULT 0
+            CHECK (personalization_used IN (0, 1)),
+          follow_up_stage INTEGER NOT NULL DEFAULT 0,
           pipeline_state TEXT NOT NULL DEFAULT 'PENDING'
             CHECK (pipeline_state IN ('PENDING', 'DRAFTED', 'REVIEWED', 'DONE')),
           selected_for_sync INTEGER NOT NULL DEFAULT 1,
           gmail_draft_id TEXT,
+          gmail_draft_for_draft_id INTEGER,
           gmail_draft_created_at TEXT,
           source_last_synced_at TEXT,
           created_at TEXT NOT NULL,
@@ -117,9 +126,14 @@ def _ensure_outreach_items_classification_values(conn: sqlite3.Connection) -> No
           duplicate_type,
           duplicate_of_lead_id,
           duplicate_reason,
+          template_variant,
+          opener_variant,
+          personalization_used,
+          follow_up_stage,
           pipeline_state,
           selected_for_sync,
           gmail_draft_id,
+          gmail_draft_for_draft_id,
           gmail_draft_created_at,
           source_last_synced_at,
           created_at,
@@ -135,9 +149,14 @@ def _ensure_outreach_items_classification_values(conn: sqlite3.Connection) -> No
           NULL AS duplicate_type,
           NULL AS duplicate_of_lead_id,
           NULL AS duplicate_reason,
+          NULL AS template_variant,
+          NULL AS opener_variant,
+          0 AS personalization_used,
+          0 AS follow_up_stage,
           pipeline_state,
           selected_for_sync,
           NULL AS gmail_draft_id,
+          NULL AS gmail_draft_for_draft_id,
           NULL AS gmail_draft_created_at,
           source_last_synced_at,
           created_at,
@@ -168,6 +187,10 @@ def _ensure_outreach_items_columns(conn: sqlite3.Connection) -> None:
     }
     if "gmail_draft_id" not in columns:
         conn.execute("ALTER TABLE outreach_items ADD COLUMN gmail_draft_id TEXT")
+    if "gmail_draft_for_draft_id" not in columns:
+        conn.execute(
+            "ALTER TABLE outreach_items ADD COLUMN gmail_draft_for_draft_id INTEGER"
+        )
     if "gmail_draft_created_at" not in columns:
         conn.execute("ALTER TABLE outreach_items ADD COLUMN gmail_draft_created_at TEXT")
     if "duplicate_flag" not in columns:
@@ -180,6 +203,18 @@ def _ensure_outreach_items_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE outreach_items ADD COLUMN duplicate_of_lead_id INTEGER")
     if "duplicate_reason" not in columns:
         conn.execute("ALTER TABLE outreach_items ADD COLUMN duplicate_reason TEXT")
+    if "template_variant" not in columns:
+        conn.execute("ALTER TABLE outreach_items ADD COLUMN template_variant TEXT")
+    if "opener_variant" not in columns:
+        conn.execute("ALTER TABLE outreach_items ADD COLUMN opener_variant TEXT")
+    if "personalization_used" not in columns:
+        conn.execute(
+            "ALTER TABLE outreach_items ADD COLUMN personalization_used INTEGER NOT NULL DEFAULT 0"
+        )
+    if "follow_up_stage" not in columns:
+        conn.execute(
+            "ALTER TABLE outreach_items ADD COLUMN follow_up_stage INTEGER NOT NULL DEFAULT 0"
+        )
 
     conn.execute(
         """
@@ -191,5 +226,26 @@ def _ensure_outreach_items_columns(conn: sqlite3.Connection) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_outreach_duplicate_flag
           ON outreach_items(duplicate_flag)
+        """
+    )
+
+
+def _backfill_gmail_draft_for_draft_id(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        UPDATE outreach_items
+        SET gmail_draft_for_draft_id = (
+            SELECT d.id
+            FROM drafts d
+            WHERE d.outreach_item_id = outreach_items.id
+              AND (
+                  outreach_items.gmail_draft_created_at IS NULL
+                  OR d.created_at <= outreach_items.gmail_draft_created_at
+              )
+            ORDER BY d.version DESC
+            LIMIT 1
+        )
+        WHERE gmail_draft_id IS NOT NULL
+          AND gmail_draft_for_draft_id IS NULL
         """
     )

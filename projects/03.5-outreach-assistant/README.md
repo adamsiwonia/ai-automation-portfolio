@@ -20,6 +20,7 @@ Draft-first outreach assistant that imports leads from Google Sheets into SQLite
 - `Response` -> `human_response` (preserved, never overwritten)
 - `Notes` -> `notes` (preserved, never overwritten)
 - `Segment` -> lead category source of truth
+- `Angle` (fallback `Note`) -> optional lightweight personalization input
 - `Assistant Status` -> source status used by processing
 
 ### Sync mapping
@@ -51,6 +52,22 @@ The assistant does not write to `Response` or `Notes`.
 - `Date Sent` present and `Follow Up Date` equals today -> `FOLLOW_UP_READY`
 - `Follow Up Date` empty -> `DONE` (no follow-up draft)
 - `Follow Up Date` not today -> `DONE` (no follow-up draft)
+- Follow-up draft stages are limited to two variants:
+  - stage 1 -> `follow_up_1`
+  - stage 2 -> `follow_up_2`
+  - stage > 2 -> no new follow-up draft (`DONE`)
+
+### Draft Variants and Personalization
+
+- First-touch drafts rotate across template styles: `soft`, `direct`, `bold`.
+- First-touch drafts also rotate across a small opener set (deterministic from row seed).
+- Personalization inserts exactly one short sentence when `Angle` (or fallback `Note`) is present.
+- When `Angle` is missing, first-touch drafts are generated normally without personalization.
+- Variant tracking is stored in SQLite on `outreach_items`:
+  - `template_variant`
+  - `opener_variant`
+  - `personalization_used`
+  - `follow_up_stage`
 
 ### Duplicate Handling
 

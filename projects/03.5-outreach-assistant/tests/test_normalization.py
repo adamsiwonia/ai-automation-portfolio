@@ -28,6 +28,7 @@ def _settings() -> Settings:
         response_column="Response",
         notes_column="Notes",
         segment_column="Segment",
+        angle_column="Angle",
         last_contacted_column="Date Sent",
         follow_up_due_column="Follow Up Date",
         sync_lead_type_column="Lead Type",
@@ -96,6 +97,7 @@ def test_normalize_sheet_row_uses_column_mapping() -> None:
     assert normalized.contact_name is None
     assert normalized.email == "alex@northwind.com"
     assert normalized.segment == "other"
+    assert normalized.angle is None
     assert normalized.contact_channel == ContactChannel.EMAIL.value
 
 
@@ -129,3 +131,61 @@ def test_normalize_sheet_row_company_falls_back_to_firma() -> None:
         source_row_number=2,
     )
     assert normalized.company_name == "Legacy Company Header"
+
+
+def test_normalize_sheet_row_uses_angle_then_note_fallback() -> None:
+    with_angle = {
+        "Company": "Angle Co",
+        "Email": "angle@example.com",
+        "Assistant Status": "",
+        "Response": "",
+        "Notes": "",
+        "Segment": "outdoor",
+        "Angle": "BMW performance parts",
+        "Date Sent": "",
+        "Follow Up Date": "",
+    }
+    with_note_only = {
+        "Company": "Note Co",
+        "Email": "note@example.com",
+        "Assistant Status": "",
+        "Response": "",
+        "Note": "4x4 accessories",
+        "Notes": "",
+        "Segment": "workshop",
+        "Date Sent": "",
+        "Follow Up Date": "",
+    }
+    no_angle_column = {
+        "Company": "No Angle Co",
+        "Email": "plain@example.com",
+        "Assistant Status": "",
+        "Response": "",
+        "Notes": "",
+        "Segment": "car parts",
+        "Date Sent": "",
+        "Follow Up Date": "",
+    }
+
+    normalized_with_angle = normalize_sheet_row(
+        with_angle,
+        settings=_settings(),
+        source_sheet="Leads",
+        source_row_number=2,
+    )
+    normalized_with_note = normalize_sheet_row(
+        with_note_only,
+        settings=_settings(),
+        source_sheet="Leads",
+        source_row_number=3,
+    )
+    normalized_without_column = normalize_sheet_row(
+        no_angle_column,
+        settings=_settings(),
+        source_sheet="Leads",
+        source_row_number=4,
+    )
+
+    assert normalized_with_angle.angle == "BMW performance parts"
+    assert normalized_with_note.angle == "4x4 accessories"
+    assert normalized_without_column.angle is None

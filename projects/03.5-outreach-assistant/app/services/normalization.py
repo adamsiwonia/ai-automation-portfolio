@@ -42,6 +42,7 @@ class NormalizedLeadRow:
     website: str | None
     notes: str | None
     segment: str | None
+    angle: str | None
     human_response: str | None
     source_status: str | None
     contact_name: str | None
@@ -245,6 +246,11 @@ def normalize_sheet_row(
         website=normalize_url(_get_row_value(row, settings.website_column)),
         notes=_get_row_value(row, settings.notes_column),
         segment=normalize_segment(_get_row_value(row, settings.segment_column)),
+        angle=_get_row_value(
+            row,
+            settings.angle_column,
+            aliases=("Angle", "Note"),
+        ),
         human_response=_get_row_value(row, settings.response_column),
         source_status=_get_row_value(row, settings.assistant_status_column),
         contact_name=_get_row_value(row, settings.contact_name_column),

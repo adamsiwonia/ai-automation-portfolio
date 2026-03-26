@@ -4,6 +4,14 @@ from datetime import datetime, timezone
 
 from app.core.enums import LeadClassification
 
+
+def _is_bounce_or_invalid_status(source_status: str | None) -> bool:
+    status = (source_status or "").strip().lower()
+    if not status:
+        return False
+    return "bounce" in status or "invalid" in status
+
+
 def _parse_dt(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -53,6 +61,12 @@ def classify_lead(
     last_contacted = _parse_dt(last_contacted_at)
     if not last_contacted:
         return LeadClassification.FIRST_TOUCH_READY, "Date Sent is empty."
+
+    if _is_bounce_or_invalid_status(source_status):
+        return (
+            LeadClassification.DONE,
+            "Follow-up skipped because source status indicates bounce/invalid recipient.",
+        )
 
     follow_up_raw = (follow_up_due_at or "").strip()
     if not follow_up_raw:

@@ -19,10 +19,12 @@ class LeadSnapshot:
     website: str | None
     notes: str | None
     segment: str | None
+    angle: str | None
     source_status: str | None
     human_response: str | None
     last_contacted_at: str | None
     follow_up_due_at: str | None
+    existing_follow_up_stage: int
     contact_id: int | None
     contact_name: str | None
     raw_contact_value: str | None
@@ -78,6 +80,7 @@ def upsert_lead_and_contact(
                 website = ?,
                 notes = ?,
                 segment = ?,
+                angle = ?,
                 human_response = ?,
                 source_status = ?,
                 raw_contact_name = ?,
@@ -93,6 +96,7 @@ def upsert_lead_and_contact(
                 row.website,
                 notes_value,
                 row.segment,
+                row.angle,
                 human_response_value,
                 row.source_status,
                 row.contact_name,
@@ -114,6 +118,7 @@ def upsert_lead_and_contact(
                 website,
                 notes,
                 segment,
+                angle,
                 human_response,
                 source_status,
                 raw_contact_name,
@@ -122,7 +127,7 @@ def upsert_lead_and_contact(
                 follow_up_due_at,
                 created_at,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 row.external_id,
@@ -132,6 +137,7 @@ def upsert_lead_and_contact(
                 row.website,
                 row.notes,
                 row.segment,
+                row.angle,
                 row.human_response,
                 row.source_status,
                 row.contact_name,
@@ -217,10 +223,12 @@ def list_lead_snapshots(conn: sqlite3.Connection) -> list[LeadSnapshot]:
             l.website,
             l.notes,
             l.segment,
+            l.angle,
             l.source_status,
             l.human_response,
             l.last_contacted_at,
             l.follow_up_due_at,
+            COALESCE(o.follow_up_stage, 0) AS existing_follow_up_stage,
             c.id AS contact_id,
             c.full_name AS contact_name,
             c.raw_value AS raw_contact_value,
@@ -228,6 +236,7 @@ def list_lead_snapshots(conn: sqlite3.Connection) -> list[LeadSnapshot]:
             c.contact_form_url,
             c.malformed_value
         FROM leads l
+        LEFT JOIN outreach_items o ON o.lead_id = l.id
         LEFT JOIN contacts c ON c.lead_id = l.id
         ORDER BY l.id ASC
         """
@@ -242,10 +251,12 @@ def list_lead_snapshots(conn: sqlite3.Connection) -> list[LeadSnapshot]:
             website=row["website"],
             notes=row["notes"],
             segment=row["segment"],
+            angle=row["angle"],
             source_status=row["source_status"],
             human_response=row["human_response"],
             last_contacted_at=row["last_contacted_at"],
             follow_up_due_at=row["follow_up_due_at"],
+            existing_follow_up_stage=int(row["existing_follow_up_stage"] or 0),
             contact_id=int(row["contact_id"]) if row["contact_id"] is not None else None,
             contact_name=row["contact_name"],
             raw_contact_value=row["raw_contact_value"],
@@ -268,6 +279,10 @@ def upsert_outreach_item(
     duplicate_type: str | None = None,
     duplicate_of_lead_id: int | None = None,
     duplicate_reason: str | None = None,
+    template_variant: str | None = None,
+    opener_variant: str | None = None,
+    personalization_used: bool = False,
+    follow_up_stage: int = 0,
 ) -> int:
     now = utc_now()
     existing = conn.execute(
@@ -289,6 +304,10 @@ def upsert_outreach_item(
                 duplicate_type = ?,
                 duplicate_of_lead_id = ?,
                 duplicate_reason = ?,
+                template_variant = ?,
+                opener_variant = ?,
+                personalization_used = ?,
+                follow_up_stage = ?,
                 pipeline_state = ?,
                 updated_at = ?
             WHERE id = ?
@@ -301,6 +320,10 @@ def upsert_outreach_item(
                 duplicate_type,
                 duplicate_of_lead_id,
                 duplicate_reason,
+                template_variant,
+                opener_variant,
+                1 if personalization_used else 0,
+                max(0, follow_up_stage),
                 pipeline_state,
                 now,
                 outreach_item_id,
@@ -319,10 +342,14 @@ def upsert_outreach_item(
             duplicate_type,
             duplicate_of_lead_id,
             duplicate_reason,
+            template_variant,
+            opener_variant,
+            personalization_used,
+            follow_up_stage,
             pipeline_state,
             created_at,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             lead_id,
@@ -333,6 +360,10 @@ def upsert_outreach_item(
             duplicate_type,
             duplicate_of_lead_id,
             duplicate_reason,
+            template_variant,
+            opener_variant,
+            1 if personalization_used else 0,
+            max(0, follow_up_stage),
             pipeline_state,
             now,
             now,
@@ -391,6 +422,29 @@ def insert_draft_if_changed(
     )
 
     return int(cursor.lastrowid), True
+
+
+def get_original_subject_for_lead(
+    conn: sqlite3.Connection,
+    *,
+    lead_id: int,
+) -> str | None:
+    row = conn.execute(
+        """
+        SELECT d.subject
+        FROM drafts d
+        JOIN outreach_items o ON o.id = d.outreach_item_id
+        WHERE o.lead_id = ?
+        ORDER BY d.version ASC
+        LIMIT 1
+        """,
+        (lead_id,),
+    ).fetchone()
+    if not row:
+        return None
+
+    subject = str(row["subject"] or "").strip()
+    return subject or None
 
 
 def _draft_type_for_classification(classification: str) -> str:
@@ -519,7 +573,11 @@ def list_gmail_draft_candidates(
     force: bool = False,
 ) -> list[GmailDraftCandidate]:
     selected_filter = "AND o.selected_for_sync = 1 AND ld.selected_for_sync = 1" if only_selected else ""
-    force_filter = "" if force else "AND o.gmail_draft_id IS NULL"
+    force_filter = (
+        ""
+        if force
+        else "AND (o.gmail_draft_for_draft_id IS NULL OR o.gmail_draft_for_draft_id <> ld.id)"
+    )
 
     query = f"""
     WITH latest_drafts AS (
@@ -580,17 +638,19 @@ def mark_gmail_draft_created(
     *,
     outreach_item_id: int,
     gmail_draft_id: str,
+    draft_record_id: int | None = None,
 ) -> None:
     now = utc_now()
     conn.execute(
         """
         UPDATE outreach_items
         SET gmail_draft_id = ?,
+            gmail_draft_for_draft_id = ?,
             gmail_draft_created_at = ?,
             updated_at = ?
         WHERE id = ?
         """,
-        (gmail_draft_id, now, now, outreach_item_id),
+        (gmail_draft_id, draft_record_id, now, now, outreach_item_id),
     )
 
 

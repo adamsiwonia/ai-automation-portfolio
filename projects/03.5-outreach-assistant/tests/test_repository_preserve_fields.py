@@ -16,6 +16,7 @@ def _row(*, notes: str | None, response: str | None, segment: str) -> Normalized
         website=None,
         notes=notes,
         segment=segment,
+        angle=None,
         human_response=response,
         source_status="new",
         contact_name=None,

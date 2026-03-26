@@ -9,6 +9,7 @@ from app.core.config import Settings
 from app.core.enums import LeadClassification
 from app.repositories.leads import (
     LeadSnapshot,
+    get_original_subject_for_lead,
     insert_draft_if_changed,
     list_lead_snapshots,
     list_sync_candidates,
@@ -193,6 +194,9 @@ def classify_and_generate(
     drafts_reused = 0
 
     for snapshot in snapshots:
+        existing_stage = max(0, int(snapshot.existing_follow_up_stage or 0))
+        target_follow_up_stage = existing_stage
+
         duplicate_decision = duplicate_decisions.get(
             snapshot.lead_id,
             DuplicateDecision(
@@ -213,14 +217,47 @@ def classify_and_generate(
             follow_up_due_at=snapshot.follow_up_due_at,
         )
 
+        if classification == LeadClassification.FIRST_TOUCH_READY:
+            target_follow_up_stage = 0
+        elif classification == LeadClassification.FOLLOW_UP_READY:
+            if existing_stage >= 2:
+                classification = LeadClassification.DONE
+                reason = "Follow-up limit reached (max stage 2)."
+                target_follow_up_stage = existing_stage
+            else:
+                target_follow_up_stage = existing_stage + 1
+
         if duplicate_decision.is_hard_duplicate and classification in READY_CLASSIFICATIONS:
             classification = LeadClassification.DONE
             reason = (
                 "Hard duplicate blocked from outreach. "
                 f"{duplicate_decision.duplicate_reason or ''}"
             ).strip()
+            target_follow_up_stage = existing_stage
         elif duplicate_decision.duplicate_flag and duplicate_decision.duplicate_reason:
             reason = f"{reason} {duplicate_decision.duplicate_reason}".strip()
+
+        draft_seed = (
+            f"{snapshot.source_sheet}:{snapshot.source_row_number}:"
+            f"{snapshot.company_name}:{snapshot.segment or ''}:{snapshot.angle or ''}:"
+            f"{target_follow_up_stage}"
+        )
+        original_subject = (
+            get_original_subject_for_lead(conn, lead_id=snapshot.lead_id)
+            if classification == LeadClassification.FOLLOW_UP_READY
+            else None
+        )
+        draft = build_outreach_draft(
+            classification=classification,
+            company_name=snapshot.company_name,
+            contact_name=snapshot.contact_name,
+            segment=snapshot.segment,
+            notes=snapshot.notes,
+            angle=snapshot.angle,
+            follow_up_stage=target_follow_up_stage,
+            original_subject=original_subject,
+            seed_text=draft_seed,
+        )
 
         classification_counts[classification.value] += 1
         outreach_item_id = upsert_outreach_item(
@@ -233,14 +270,10 @@ def classify_and_generate(
             duplicate_type=duplicate_decision.duplicate_type,
             duplicate_of_lead_id=duplicate_decision.duplicate_of_lead_id,
             duplicate_reason=duplicate_decision.duplicate_reason,
-        )
-
-        draft = build_outreach_draft(
-            classification=classification,
-            company_name=snapshot.company_name,
-            contact_name=snapshot.contact_name,
-            segment=snapshot.segment,
-            notes=snapshot.notes,
+            template_variant=draft.template_variant if draft else None,
+            opener_variant=draft.opener_variant if draft else None,
+            personalization_used=draft.personalization_used if draft else False,
+            follow_up_stage=target_follow_up_stage,
         )
         if draft:
             _, created = insert_draft_if_changed(

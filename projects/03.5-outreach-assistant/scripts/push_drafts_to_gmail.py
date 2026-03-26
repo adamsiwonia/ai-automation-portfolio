@@ -108,6 +108,7 @@ def main() -> None:
                 conn,
                 outreach_item_id=candidate.outreach_item_id,
                 gmail_draft_id=gmail_draft_id,
+                draft_record_id=candidate.draft_record_id,
             )
             created += 1
 

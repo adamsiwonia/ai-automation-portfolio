@@ -30,6 +30,7 @@ class Settings:
     response_column: str
     notes_column: str
     segment_column: str
+    angle_column: str
     last_contacted_column: str
     follow_up_due_column: str
     sync_lead_type_column: str
@@ -210,6 +211,7 @@ def get_settings() -> Settings:
         response_column=_read_env("SHEET_RESPONSE_COLUMN", "Response") or "Response",
         notes_column=_read_env("SHEET_NOTES_COLUMN", "Notes") or "Notes",
         segment_column=_read_env("SHEET_SEGMENT_COLUMN", "Segment") or "Segment",
+        angle_column=_read_env("SHEET_ANGLE_COLUMN", "Angle") or "Angle",
         last_contacted_column=_read_env("SHEET_LAST_CONTACTED_COLUMN", "Date Sent")
         or "Date Sent",
         follow_up_due_column=_read_env("SHEET_FOLLOW_UP_DUE_COLUMN", "Follow Up Date")

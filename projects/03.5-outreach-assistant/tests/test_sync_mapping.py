@@ -308,8 +308,8 @@ def test_gmail_candidates_skip_existing_unless_force() -> None:
         """
         INSERT INTO outreach_items (
             lead_id, contact_id, classification, reason, pipeline_state, selected_for_sync,
-            gmail_draft_id, source_last_synced_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            gmail_draft_id, gmail_draft_for_draft_id, source_last_synced_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             lead_id,
@@ -319,6 +319,7 @@ def test_gmail_candidates_skip_existing_unless_force() -> None:
             "DRAFTED",
             1,
             "r_existing_draft",
+            1,
             None,
             now,
             now,
@@ -414,14 +415,167 @@ def test_mark_gmail_draft_created_persists_id() -> None:
         conn,
         outreach_item_id=outreach_item_id,
         gmail_draft_id="r_new_draft",
+        draft_record_id=9,
     )
     conn.commit()
     row = conn.execute(
-        "SELECT gmail_draft_id, gmail_draft_created_at FROM outreach_items WHERE id = ?",
+        "SELECT gmail_draft_id, gmail_draft_for_draft_id, gmail_draft_created_at FROM outreach_items WHERE id = ?",
         (outreach_item_id,),
     ).fetchone()
     conn.close()
 
     assert row is not None
     assert row["gmail_draft_id"] == "r_new_draft"
+    assert int(row["gmail_draft_for_draft_id"]) == 9
     assert row["gmail_draft_created_at"] is not None
+
+
+def test_follow_up_candidate_not_blocked_by_existing_first_touch_gmail_draft() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    schema = Path("app/database/schema.sql").read_text(encoding="utf-8")
+    conn.executescript(schema)
+
+    now = "2026-03-24T12:00:00Z"
+    conn.execute(
+        """
+        INSERT INTO leads (
+            external_id, source_sheet, source_row_number, company_name, website, notes,
+            segment, human_response, source_status, raw_contact_name, raw_contact_value,
+            last_contacted_at, follow_up_due_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            None,
+            "TEST",
+            7,
+            "Shop",
+            None,
+            None,
+            "other",
+            None,
+            "",
+            None,
+            "owner@example.com",
+            "2026-03-01",
+            "2026-03-24",
+            now,
+            now,
+        ),
+    )
+    lead_id = int(conn.execute("SELECT id FROM leads WHERE source_row_number = 7").fetchone()["id"])
+
+    conn.execute(
+        """
+        INSERT INTO contacts (
+            lead_id, full_name, raw_value, email, contact_form_url,
+            malformed_value, channel, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            lead_id,
+            None,
+            "owner@example.com",
+            "owner@example.com",
+            None,
+            None,
+            "EMAIL",
+            now,
+            now,
+        ),
+    )
+    contact_id = int(conn.execute("SELECT id FROM contacts WHERE lead_id = ?", (lead_id,)).fetchone()["id"])
+
+    conn.execute(
+        """
+        INSERT INTO outreach_items (
+            lead_id, contact_id, classification, reason, pipeline_state, selected_for_sync,
+            gmail_draft_id, gmail_draft_for_draft_id, gmail_draft_created_at,
+            source_last_synced_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            lead_id,
+            contact_id,
+            "FOLLOW_UP_READY",
+            "Follow-up triggered because Follow Up Date is today.",
+            "DRAFTED",
+            1,
+            "r_first_touch_draft",
+            1,
+            "2026-03-20T10:00:00Z",
+            None,
+            now,
+            now,
+        ),
+    )
+    outreach_item_id = int(conn.execute("SELECT id FROM outreach_items WHERE lead_id = ?", (lead_id,)).fetchone()["id"])
+
+    conn.execute(
+        """
+        INSERT INTO drafts (
+            outreach_item_id, version, subject, body, generator, selected_for_sync,
+            synced_to_sheet, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            outreach_item_id,
+            1,
+            "Quick question about customer emails",
+            "First-touch body",
+            "template-v2",
+            1,
+            1,
+            "2026-03-20T09:00:00Z",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO drafts (
+            outreach_item_id, version, subject, body, generator, selected_for_sync,
+            synced_to_sheet, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            outreach_item_id,
+            2,
+            "Quick follow-up",
+            "Follow-up body",
+            "template-v2",
+            1,
+            0,
+            "2026-03-24T11:00:00Z",
+        ),
+    )
+    follow_up_draft_id = int(
+        conn.execute(
+            "SELECT id FROM drafts WHERE outreach_item_id = ? AND version = 2",
+            (outreach_item_id,),
+        ).fetchone()["id"]
+    )
+    conn.commit()
+
+    candidates = list_gmail_draft_candidates(conn, limit=10, only_selected=True, force=False)
+    assert len(candidates) == 1
+    assert candidates[0].outreach_item_id == outreach_item_id
+    assert candidates[0].classification == "FOLLOW_UP_READY"
+    assert candidates[0].draft_record_id == follow_up_draft_id
+
+    mark_gmail_draft_created(
+        conn,
+        outreach_item_id=outreach_item_id,
+        gmail_draft_id="r_follow_up_draft",
+        draft_record_id=follow_up_draft_id,
+    )
+    conn.commit()
+
+    candidates_after_mark = list_gmail_draft_candidates(
+        conn,
+        limit=10,
+        only_selected=True,
+        force=False,
+    )
+    conn.close()
+
+    assert candidates_after_mark == []
