@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, quote_plus, urlencode
@@ -9,8 +10,7 @@ from urllib.parse import parse_qs, quote_plus, urlencode
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app.core.auth import require_api_key
-from app.database.db import fetch_logs, fetch_recent_support_metrics, get_db
+from app.database.db import fetch_logs, fetch_recent_support_metrics
 from app.services.mailboxes import (
     DEFAULT_PROCESSED_LABEL,
     DEFAULT_SKIPPED_LABEL,
@@ -511,13 +511,22 @@ def _resolve_admin_api_key(
     return None
 
 
-def _authenticate_admin_api_key(request: Request, db: Any, *, api_key: str) -> dict[str, Any]:
-    return require_api_key(
-        request=request,
-        x_api_key=api_key,
-        authorization=None,
-        db=db,
-    )
+def _get_expected_admin_api_key() -> str:
+    configured = (os.getenv("ADMIN_API_KEY") or "").strip()
+    if not configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin panel is disabled because ADMIN_API_KEY is not configured.",
+        )
+    return configured
+
+
+def _authenticate_admin_api_key(*, api_key: str) -> dict[str, Any]:
+    expected = _get_expected_admin_api_key()
+    if not secrets.compare_digest(api_key, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin API key")
+
+    return {"name": "admin-panel", "mode": "admin-env"}
 
 
 def _set_admin_cookie(response: RedirectResponse, request: Request, *, api_key: str) -> None:
@@ -543,7 +552,6 @@ def _safe_client_name(client: dict[str, Any]) -> str:
 
 def require_admin_auth(
     request: Request,
-    db=Depends(get_db),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> dict[str, Any]:
@@ -555,7 +563,7 @@ def require_admin_auth(
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing admin API key")
 
-    return _authenticate_admin_api_key(request, db, api_key=api_key)
+    return _authenticate_admin_api_key(api_key=api_key)
 
 
 def _render_status_badge(active: bool) -> str:
@@ -1016,18 +1024,22 @@ def _render_health_body(*, mailbox_counts: dict[str, int]) -> str:
 @router.get("", response_class=HTMLResponse)
 def admin_entry(
     request: Request,
-    db=Depends(get_db),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     authorization: str | None = Header(default=None, alias="Authorization"),
 ):
+    try:
+        _get_expected_admin_api_key()
+    except HTTPException as exc:
+        return HTMLResponse(_render_login_page(str(exc.detail)), status_code=exc.status_code)
+
     api_key = _resolve_admin_api_key(request, x_api_key=x_api_key, authorization=authorization)
     if not api_key:
         return HTMLResponse(_render_login_page())
 
     try:
-        _authenticate_admin_api_key(request, db, api_key=api_key)
-    except HTTPException:
-        response = HTMLResponse(_render_login_page("Invalid or expired API key."), status_code=401)
+        _authenticate_admin_api_key(api_key=api_key)
+    except HTTPException as exc:
+        response = HTMLResponse(_render_login_page(str(exc.detail)), status_code=exc.status_code)
         _clear_admin_cookie(response)
         return response
 
@@ -1039,15 +1051,14 @@ def admin_entry(
 @router.get("/", response_class=HTMLResponse)
 def admin_entry_slash(
     request: Request,
-    db=Depends(get_db),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     authorization: str | None = Header(default=None, alias="Authorization"),
 ):
-    return admin_entry(request=request, db=db, x_api_key=x_api_key, authorization=authorization)
+    return admin_entry(request=request, x_api_key=x_api_key, authorization=authorization)
 
 
 @router.post("/login", response_class=HTMLResponse)
-async def admin_login(request: Request, db=Depends(get_db)):
+async def admin_login(request: Request):
     body_raw = await request.body()
     form_data = parse_qs(body_raw.decode("utf-8"), keep_blank_values=True)
     normalized_api_key = str((form_data.get("api_key") or [""])[0]).strip()
@@ -1055,9 +1066,9 @@ async def admin_login(request: Request, db=Depends(get_db)):
         return HTMLResponse(_render_login_page("API key is required."), status_code=400)
 
     try:
-        _authenticate_admin_api_key(request, db, api_key=normalized_api_key)
-    except HTTPException:
-        return HTMLResponse(_render_login_page("Invalid API key."), status_code=401)
+        _authenticate_admin_api_key(api_key=normalized_api_key)
+    except HTTPException as exc:
+        return HTMLResponse(_render_login_page(str(exc.detail)), status_code=exc.status_code)
 
     response = RedirectResponse(url="/admin/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     _set_admin_cookie(response, request, api_key=normalized_api_key)

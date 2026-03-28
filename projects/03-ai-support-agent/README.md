@@ -196,8 +196,9 @@ Server-rendered internal admin pages are available under `/admin`:
 
 Auth model:
 
-* Uses the same API key validation as protected API endpoints.
-* Login form accepts an existing API key and stores it in an HttpOnly admin cookie.
+* `/admin` routes are protected by a dedicated `ADMIN_API_KEY`.
+* Ordinary API keys (`API_KEY`, `DEMO_API_KEY`, DB keys) do not grant admin access.
+* Login form accepts `ADMIN_API_KEY` and stores it in an HttpOnly admin cookie.
 
 Gmail connect flow from admin:
 
@@ -208,7 +209,7 @@ Gmail connect flow from admin:
 Notes:
 
 * No separate SPA or frontend framework is required.
-* No new environment variables are required for this admin panel slice.
+* Set `ADMIN_API_KEY` to enable admin access.
 
 ---
 ## 🧪 API Example
@@ -254,6 +255,7 @@ Create `.env`:
 OPENAI_API_KEY=your_api_key_here
 API_KEY=your_internal_api_key
 DEMO_API_KEY=your_internal_api_key
+ADMIN_API_KEY=your_admin_only_key
 
 # Required for Google OAuth mailbox connection flow
 GOOGLE_CLIENT_ID=your_google_oauth_client_id

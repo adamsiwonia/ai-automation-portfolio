@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import time
 import uuid
 import traceback
@@ -181,6 +182,25 @@ def _extract_bearer_token(authorization: str | None) -> str | None:
         return None
     token = parts[1].strip()
     return token or None
+
+
+def _get_expected_admin_api_key() -> str:
+    expected = (os.getenv("ADMIN_API_KEY") or "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin panel OAuth flow is disabled because ADMIN_API_KEY is not configured.",
+        )
+    return expected
+
+
+def _validate_admin_api_key(candidate: str | None) -> None:
+    expected = _get_expected_admin_api_key()
+    provided = (candidate or "").strip()
+    if not provided:
+        raise HTTPException(status_code=401, detail="Missing admin API key")
+    if not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Invalid admin API key")
 
 
 def _sanitize_admin_redirect_path(raw_path: object) -> str | None:
@@ -403,27 +423,31 @@ def auth_google_start(
     admin_api_key: str | None = Cookie(default=None, alias="admin_api_key"),
     db=Depends(get_db),
 ):
-    effective_api_key = (x_api_key or "").strip() or _extract_bearer_token(authorization) or (admin_api_key or "").strip()
-    if not effective_api_key:
-        raise HTTPException(status_code=401, detail="Missing API key")
+    authenticated_client_name = None
+    if redirect_to_google:
+        # Browser-based admin flow uses dedicated ADMIN_API_KEY from the admin cookie.
+        _validate_admin_api_key(admin_api_key)
+        authenticated_client_name = "admin-panel"
+    else:
+        effective_api_key = (x_api_key or "").strip() or _extract_bearer_token(authorization)
+        if not effective_api_key:
+            raise HTTPException(status_code=401, detail="Missing API key")
 
-    client = require_api_key(
-        request=request,
-        x_api_key=effective_api_key,
-        authorization=None,
-        db=db,
-    )
+        client = require_api_key(
+            request=request,
+            x_api_key=effective_api_key,
+            authorization=None,
+            db=db,
+        )
+        try:
+            authenticated_client_name = client["name"]
+        except Exception:
+            authenticated_client_name = None
 
     try:
         config = get_google_oauth_config()
     except GoogleOAuthConfigError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-
-    authenticated_client_name = None
-    try:
-        authenticated_client_name = client["name"]
-    except Exception:
-        authenticated_client_name = None
 
     effective_client_name = (client_name or authenticated_client_name or "oauth-mailbox").strip()
     state_secret = (os.getenv("GOOGLE_OAUTH_STATE_SECRET") or config.client_secret).strip()
