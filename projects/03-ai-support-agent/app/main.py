@@ -7,13 +7,15 @@ import uuid
 import traceback
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlencode
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 
+from app.admin_panel import router as admin_router
 from app.core.auth import require_api_key
 from app.core.config import get_settings
-from app.database.db import fetch_logs, init_db, insert_log
+from app.database.db import fetch_logs, get_db, init_db, insert_log
 from app.schemas import (
     GenerateRequest,
     GenerateResponse,
@@ -43,6 +45,7 @@ from app.web_demo import router as web_demo_router
 app = FastAPI(title="Project 03 - AI Support Agent", version="0.1.0")
 
 app.include_router(web_demo_router)
+app.include_router(admin_router)
 
 settings = get_settings()
 llm = LLMService(settings)
@@ -166,6 +169,44 @@ def _parse_scope_value(raw_scope: object, fallback_scopes: list[str]) -> list[st
         if scopes:
             return scopes
     return fallback_scopes
+
+
+def _extract_bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    parts = authorization.strip().split()
+    if len(parts) != 2:
+        return None
+    if parts[0].lower() != "bearer":
+        return None
+    token = parts[1].strip()
+    return token or None
+
+
+def _sanitize_admin_redirect_path(raw_path: object) -> str | None:
+    if not isinstance(raw_path, str):
+        return None
+
+    candidate = raw_path.strip()
+    if not candidate:
+        return None
+    if not candidate.startswith("/admin"):
+        return None
+    if candidate.startswith("//"):
+        return None
+    return candidate
+
+
+def _build_admin_notice_redirect(*, path: str, notice: str, is_error: bool = False) -> RedirectResponse:
+    payload: dict[str, str | int] = {"notice": notice}
+    if is_error:
+        payload["error"] = 1
+
+    separator = "&" if "?" in path else "?"
+    return RedirectResponse(
+        url=f"{path}{separator}{urlencode(payload)}",
+        status_code=303,
+    )
 
 
 @app.on_event("startup")
@@ -351,11 +392,28 @@ async def generate(req: GenerateRequest, request: Request):
 
 @app.get("/auth/google/start")
 def auth_google_start(
+    request: Request,
     client_name: Optional[str] = Query(default=None, min_length=1, max_length=200),
     processed_label: str = Query(default=DEFAULT_PROCESSED_LABEL, min_length=1, max_length=100),
     skipped_label: str = Query(default=DEFAULT_SKIPPED_LABEL, min_length=1, max_length=100),
-    client=Depends(require_api_key),
+    post_connect_redirect: Optional[str] = Query(default=None, max_length=200),
+    redirect_to_google: bool = Query(default=False),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    admin_api_key: str | None = Cookie(default=None, alias="admin_api_key"),
+    db=Depends(get_db),
 ):
+    effective_api_key = (x_api_key or "").strip() or _extract_bearer_token(authorization) or (admin_api_key or "").strip()
+    if not effective_api_key:
+        raise HTTPException(status_code=401, detail="Missing API key")
+
+    client = require_api_key(
+        request=request,
+        x_api_key=effective_api_key,
+        authorization=None,
+        db=db,
+    )
+
     try:
         config = get_google_oauth_config()
     except GoogleOAuthConfigError as exc:
@@ -372,16 +430,24 @@ def auth_google_start(
     if not state_secret:
         raise HTTPException(status_code=500, detail="OAuth state signing secret is not configured")
 
+    state_payload: dict[str, str] = {
+        "client_name": effective_client_name,
+        "processed_label": processed_label.strip(),
+        "skipped_label": skipped_label.strip(),
+    }
+    safe_post_connect_redirect = _sanitize_admin_redirect_path(post_connect_redirect)
+    if safe_post_connect_redirect:
+        state_payload["post_connect_redirect"] = safe_post_connect_redirect
+
     state = create_oauth_state(
-        {
-            "client_name": effective_client_name,
-            "processed_label": processed_label.strip(),
-            "skipped_label": skipped_label.strip(),
-        },
+        state_payload,
         state_secret,
     )
 
     authorization_url = build_google_auth_url(config, state)
+    if redirect_to_google:
+        return RedirectResponse(url=authorization_url, status_code=303)
+
     return {
         "authorization_url": authorization_url,
         "redirect_uri": config.redirect_uri,
@@ -396,6 +462,19 @@ def auth_google_callback(
     error: Optional[str] = Query(default=None),
     error_description: Optional[str] = Query(default=None),
 ):
+    def maybe_redirect_admin_error(message: str) -> RedirectResponse | None:
+        state_secret_candidate = (os.getenv("GOOGLE_OAUTH_STATE_SECRET") or os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
+        if not state or not state_secret_candidate:
+            return None
+        try:
+            payload = parse_oauth_state(state, state_secret_candidate)
+        except Exception:
+            return None
+        redirect_path = _sanitize_admin_redirect_path(payload.get("post_connect_redirect"))
+        if not redirect_path:
+            return None
+        return _build_admin_notice_redirect(path=redirect_path, notice=message, is_error=True)
+
     if error:
         if error == "access_denied":
             detail = "Google OAuth consent was denied by the user."
@@ -403,31 +482,55 @@ def auth_google_callback(
             detail = f"Google OAuth returned an error: {error}"
         if error_description:
             detail = f"{detail} ({error_description})"
+        redirect_response = maybe_redirect_admin_error(detail)
+        if redirect_response:
+            return redirect_response
         raise HTTPException(status_code=400, detail=detail)
 
     if not code:
-        raise HTTPException(status_code=400, detail="Missing OAuth code in callback.")
+        detail = "Missing OAuth code in callback."
+        redirect_response = maybe_redirect_admin_error(detail)
+        if redirect_response:
+            return redirect_response
+        raise HTTPException(status_code=400, detail=detail)
     if not state:
         raise HTTPException(status_code=400, detail="Missing OAuth state in callback.")
 
     try:
         config = get_google_oauth_config()
     except GoogleOAuthConfigError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        detail = str(exc)
+        redirect_response = maybe_redirect_admin_error(detail)
+        if redirect_response:
+            return redirect_response
+        raise HTTPException(status_code=500, detail=detail)
 
     state_secret = (os.getenv("GOOGLE_OAUTH_STATE_SECRET") or config.client_secret).strip()
     if not state_secret:
-        raise HTTPException(status_code=500, detail="OAuth state signing secret is not configured")
+        detail = "OAuth state signing secret is not configured"
+        redirect_response = maybe_redirect_admin_error(detail)
+        if redirect_response:
+            return redirect_response
+        raise HTTPException(status_code=500, detail=detail)
 
     try:
         state_payload = parse_oauth_state(state, state_secret)
     except GoogleOAuthStateError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid OAuth state: {exc}")
+        detail = f"Invalid OAuth state: {exc}"
+        redirect_response = maybe_redirect_admin_error(detail)
+        if redirect_response:
+            return redirect_response
+        raise HTTPException(status_code=400, detail=detail)
+
+    admin_redirect_path = _sanitize_admin_redirect_path(state_payload.get("post_connect_redirect"))
 
     try:
         token_payload = exchange_google_code(config, code)
     except GoogleOAuthExchangeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        detail = str(exc)
+        if admin_redirect_path:
+            return _build_admin_notice_redirect(path=admin_redirect_path, notice=detail, is_error=True)
+        raise HTTPException(status_code=502, detail=detail)
 
     access_token = (token_payload.get("access_token") or "").strip()
     refresh_token = (token_payload.get("refresh_token") or "").strip() or None
@@ -437,7 +540,10 @@ def auth_google_callback(
     try:
         mailbox_email = fetch_gmail_mailbox_email(access_token)
     except GoogleOAuthExchangeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        detail = str(exc)
+        if admin_redirect_path:
+            return _build_admin_notice_redirect(path=admin_redirect_path, notice=detail, is_error=True)
+        raise HTTPException(status_code=502, detail=detail)
 
     effective_client_name = (str(state_payload.get("client_name") or "") or mailbox_email).strip() or mailbox_email
     effective_processed_label = (
@@ -460,11 +566,23 @@ def auth_google_callback(
             active=True,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        detail = str(exc)
+        if admin_redirect_path:
+            return _build_admin_notice_redirect(path=admin_redirect_path, notice=detail, is_error=True)
+        raise HTTPException(status_code=400, detail=detail)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to persist Gmail mailbox: {exc}")
+        detail = f"Failed to persist Gmail mailbox: {exc}"
+        if admin_redirect_path:
+            return _build_admin_notice_redirect(path=admin_redirect_path, notice=detail, is_error=True)
+        raise HTTPException(status_code=500, detail=detail)
 
     created = bool(upsert_result.get("created"))
+    if admin_redirect_path:
+        mailbox_email_value = str(upsert_result.get("mailbox_email") or mailbox_email)
+        action = "connected" if created else "updated"
+        notice = f"Mailbox {mailbox_email_value} {action} successfully."
+        return _build_admin_notice_redirect(path=admin_redirect_path, notice=notice, is_error=False)
+
     return {
         "status": "connected",
         "mailbox_id": upsert_result.get("id"),

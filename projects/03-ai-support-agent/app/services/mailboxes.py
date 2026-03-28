@@ -35,6 +35,18 @@ class GmailMailbox:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class GmailMailboxRecord:
+    id: int
+    client_name: str
+    mailbox_email: str
+    processed_label: str
+    skipped_label: str
+    active: bool
+    created_at: str
+    updated_at: str
+
+
 def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -118,6 +130,94 @@ def load_active_gmail_mailboxes() -> list[GmailMailbox]:
         )
 
     return mailboxes
+
+
+def list_gmail_mailboxes(limit: int = 200) -> list[GmailMailboxRecord]:
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+
+    query = """
+    SELECT
+      id,
+      client_name,
+      mailbox_email,
+      processed_label,
+      skipped_label,
+      active,
+      created_at,
+      updated_at
+    FROM gmail_mailboxes
+    ORDER BY updated_at DESC, id DESC
+    LIMIT ?
+    """
+
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(query, (limit,)).fetchall()
+    except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+        logger.warning("Could not list gmail_mailboxes from DB: %r", exc)
+        return []
+
+    items: list[GmailMailboxRecord] = []
+    for row in rows:
+        items.append(
+            GmailMailboxRecord(
+                id=int(row["id"]),
+                client_name=(row["client_name"] or "").strip(),
+                mailbox_email=(row["mailbox_email"] or "").strip().lower(),
+                processed_label=(row["processed_label"] or DEFAULT_PROCESSED_LABEL).strip(),
+                skipped_label=(row["skipped_label"] or DEFAULT_SKIPPED_LABEL).strip(),
+                active=bool(row["active"]),
+                created_at=(row["created_at"] or ""),
+                updated_at=(row["updated_at"] or ""),
+            )
+        )
+
+    return items
+
+
+def fetch_gmail_mailbox_counts() -> dict[str, int]:
+    query = """
+    SELECT
+      COUNT(*) AS total_count,
+      SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS active_count
+    FROM gmail_mailboxes
+    """
+
+    try:
+        with get_conn() as conn:
+            row = conn.execute(query).fetchone()
+    except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+        logger.warning("Could not fetch gmail_mailbox counts from DB: %r", exc)
+        return {"total": 0, "active": 0, "inactive": 0}
+
+    total = int((row["total_count"] or 0) if row else 0)
+    active = int((row["active_count"] or 0) if row else 0)
+    inactive = max(0, total - active)
+    return {"total": total, "active": active, "inactive": inactive}
+
+
+def set_gmail_mailbox_active(*, mailbox_id: int, active: bool) -> bool:
+    if mailbox_id <= 0:
+        raise ValueError("mailbox_id must be positive")
+
+    query = """
+    UPDATE gmail_mailboxes
+    SET active = ?, updated_at = ?
+    WHERE id = ?
+    """
+
+    with get_conn() as conn:
+        cursor = conn.execute(
+            query,
+            (
+                1 if active else 0,
+                _now_utc_iso(),
+                mailbox_id,
+            ),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def update_mailbox_tokens(

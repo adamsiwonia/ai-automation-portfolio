@@ -40,6 +40,7 @@ All responses are draft-only — nothing is sent automatically.
 * Structured output validation (safe LLM usage)
 * Gmail integration with automatic draft creation
 * Full request logging and observability
+* Lightweight server-rendered admin panel for mailbox overview and activate/deactivate controls
 
 ---
 
@@ -181,6 +182,35 @@ This allows:
 
 ---
 
+## Admin Panel
+
+Server-rendered internal admin pages are available under `/admin`:
+
+* `GET /admin` - admin entry/login page
+* `GET /admin/dashboard` - mailbox + support activity overview
+* `GET /admin/mailboxes` - mailbox table with status/action controls
+* `GET /admin/logs` - support log table with lightweight filters
+* `GET /admin/health` - operational health/config checks (no secret values)
+* `POST /admin/mailboxes/{mailbox_id}/activate` - mark mailbox active
+* `POST /admin/mailboxes/{mailbox_id}/deactivate` - mark mailbox inactive
+
+Auth model:
+
+* Uses the same API key validation as protected API endpoints.
+* Login form accepts an existing API key and stores it in an HttpOnly admin cookie.
+
+Gmail connect flow from admin:
+
+* Use the Connect Gmail form on `/admin/mailboxes` (redirect-based OAuth flow).
+* It starts via `GET /auth/google/start?...&redirect_to_google=1`.
+* Callback (`GET /auth/google/callback`) preserves JSON behavior by default, and redirects back to admin with a notice when admin redirect metadata is present in OAuth state.
+
+Notes:
+
+* No separate SPA or frontend framework is required.
+* No new environment variables are required for this admin panel slice.
+
+---
 ## 🧪 API Example
 
 ### POST /generate
@@ -282,3 +312,4 @@ This project demonstrates:
 * backend architecture for AI systems
 
 The goal is to evolve this into a commercial AI support automation service for small businesses.
+

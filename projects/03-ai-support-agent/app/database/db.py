@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import logging
+import os
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Generator, Any
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]  # .../projects/03-ai-support-agent
 
- # Make DB path configurable via env (Render-ready)
- 
-import os
-
-PROJECT_DIR = Path(__file__).resolve().parents[2] 
+logger = logging.getLogger(__name__)
 
 DB_PATH = Path(
     os.getenv(
@@ -19,7 +18,6 @@ DB_PATH = Path(
     )
 )
 
-SCHEMA_PATH = PROJECT_DIR / "app" / "database" / "schema.sql"
 SCHEMA_PATH = PROJECT_DIR / "app" / "database" / "schema.sql"
 
 
@@ -31,7 +29,7 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
-# ✅ FastAPI dependency (to jest to, czego potrzebuje auth.py)
+# FastAPI dependency used by auth and protected endpoints.
 def get_db() -> Generator[sqlite3.Connection, None, None]:
     conn = get_conn()
     try:
@@ -88,7 +86,12 @@ def insert_log(
         conn.commit()
 
 
-def fetch_logs(limit: int = 50, parse_ok: int | None = None, category: str | None = None) -> list[dict[str, Any]]:
+def fetch_logs(
+    limit: int = 50,
+    parse_ok: int | None = None,
+    category: str | None = None,
+    created_after: str | None = None,
+) -> list[dict[str, Any]]:
     q = """
     SELECT id, request_id, created_at, source, customer_from, subject,
            category, reply, next_step, parse_ok, error_message
@@ -105,6 +108,10 @@ def fetch_logs(limit: int = 50, parse_ok: int | None = None, category: str | Non
         where.append("category = ?")
         params.append(category)
 
+    if created_after:
+        where.append("created_at >= ?")
+        params.append(created_after)
+
     if where:
         q += " WHERE " + " AND ".join(where)
 
@@ -114,3 +121,29 @@ def fetch_logs(limit: int = 50, parse_ok: int | None = None, category: str | Non
     with get_conn() as conn:
         rows = conn.execute(q, params).fetchall()
         return [dict(r) for r in rows]
+
+
+def fetch_recent_support_metrics(hours: int = 24) -> dict[str, int]:
+    if hours <= 0:
+        raise ValueError("hours must be > 0")
+
+    window_start = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    query = """
+    SELECT
+      COUNT(*) AS total_count,
+      SUM(CASE WHEN parse_ok = 0 OR error_message IS NOT NULL THEN 1 ELSE 0 END) AS error_count
+    FROM support_logs
+    WHERE created_at >= ?
+    """
+
+    try:
+        with get_conn() as conn:
+            row = conn.execute(query, (window_start,)).fetchone()
+    except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+        logger.warning("Could not fetch recent support metrics: %r", exc)
+        return {"recent_total": 0, "recent_errors": 0}
+
+    recent_total = int((row["total_count"] or 0) if row else 0)
+    recent_errors = int((row["error_count"] or 0) if row else 0)
+    return {"recent_total": recent_total, "recent_errors": recent_errors}
+
