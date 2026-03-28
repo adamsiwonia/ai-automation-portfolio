@@ -287,6 +287,12 @@ Run Gmail worker:
 python scripts/worker_loop.py
 ```
 
+Run smoke checks (OAuth + worker + DB):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/smoke_check.ps1
+```
+
 Connect a Gmail mailbox via OAuth (backend-only):
 
 ```bash
