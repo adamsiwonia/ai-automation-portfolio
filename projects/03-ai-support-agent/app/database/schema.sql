@@ -54,3 +54,11 @@ CREATE TABLE IF NOT EXISTS gmail_mailboxes (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_gmail_mailboxes_email ON gmail_mailboxes(mailbox_email);
 CREATE INDEX IF NOT EXISTS idx_gmail_mailboxes_active ON gmail_mailboxes(active);
+
+CREATE TABLE IF NOT EXISTS runtime_status (
+    component TEXT PRIMARY KEY,
+    last_heartbeat_at TEXT NOT NULL,
+    status TEXT,
+    details TEXT,
+    updated_at TEXT NOT NULL
+);

@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, quote_plus, urlencode
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app.database.db import fetch_logs, fetch_recent_support_metrics
+from app.database.db import fetch_logs, fetch_recent_support_metrics, fetch_runtime_status
 from app.services.mailboxes import (
     DEFAULT_PROCESSED_LABEL,
     DEFAULT_SKIPPED_LABEL,
@@ -25,9 +25,15 @@ router = APIRouter(prefix="/admin", include_in_schema=False)
 ADMIN_COOKIE_NAME = "admin_api_key"
 ADMIN_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
 RECENT_LOG_WINDOW_HOURS = 24
-LATEST_MAILBOX_UPDATES_LIMIT = 6
 MAILBOX_LIST_LIMIT = 250
 ADMIN_LOGS_LIMIT_DEFAULT = 100
+WORKER_COMPONENT_NAME = "worker"
+WORKER_RUNNING_AFTER_SECONDS = 90
+WORKER_STALE_AFTER_SECONDS = 300
+PROCESSING_ACTIVE_WINDOW_SECONDS = 60 * 60
+PROCESSING_LOW_ACTIVITY_WINDOW_SECONDS = 24 * 60 * 60
+DASHBOARD_ACTIVITY_LIMIT = 10
+DASHBOARD_ACTIVITY_HOURS = 24
 
 ADMIN_CSS = """
 :root {
@@ -478,6 +484,195 @@ def _format_timestamp(raw_iso: str) -> str:
         return raw
 
 
+def _parse_iso_utc(raw_iso: str | None) -> datetime | None:
+    raw = (raw_iso or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _format_relative_age_from_seconds(age_seconds: float | None) -> str:
+    if age_seconds is None:
+        return "-"
+    if age_seconds < 0:
+        age_seconds = 0
+
+    total_seconds = int(age_seconds)
+    if total_seconds < 60:
+        return f"{total_seconds} seconds ago"
+    if total_seconds < 3600:
+        minutes = total_seconds // 60
+        return f"{minutes} minutes ago"
+    if total_seconds < 86400:
+        hours = total_seconds // 3600
+        return f"{hours} hours ago"
+    days = total_seconds // 86400
+    return f"{days} days ago"
+
+
+def _get_google_oauth_config_status() -> dict[str, bool]:
+    has_client_id = bool((os.getenv("GOOGLE_CLIENT_ID") or "").strip())
+    has_client_secret = bool((os.getenv("GOOGLE_CLIENT_SECRET") or "").strip())
+    has_redirect_uri = bool((os.getenv("GOOGLE_REDIRECT_URI") or "").strip())
+    configured = has_client_id and has_client_secret and has_redirect_uri
+    return {
+        "configured": configured,
+        "has_client_id": has_client_id,
+        "has_client_secret": has_client_secret,
+        "has_redirect_uri": has_redirect_uri,
+    }
+
+
+def _build_worker_runtime_view(runtime_row: dict[str, Any] | None) -> dict[str, str]:
+    if not runtime_row:
+        return {
+            "state": "unknown",
+            "label": "Unknown",
+            "last_heartbeat": "-",
+            "last_heartbeat_relative": "-",
+            "detail": "No worker heartbeat recorded yet.",
+        }
+
+    heartbeat_raw = str(runtime_row.get("last_heartbeat_at") or "").strip()
+    heartbeat_dt = _parse_iso_utc(heartbeat_raw)
+    status_detail = str(runtime_row.get("details") or "").strip()
+
+    if not heartbeat_dt:
+        return {
+            "state": "unknown",
+            "label": "Unknown",
+            "last_heartbeat": heartbeat_raw or "-",
+            "last_heartbeat_relative": "-",
+            "detail": status_detail,
+        }
+
+    age_seconds = (datetime.now(timezone.utc) - heartbeat_dt).total_seconds()
+    relative = _format_relative_age_from_seconds(age_seconds)
+    if age_seconds <= WORKER_RUNNING_AFTER_SECONDS:
+        return {
+            "state": "running",
+            "label": "Running",
+            "last_heartbeat": _format_timestamp(heartbeat_dt.isoformat()),
+            "last_heartbeat_relative": relative,
+            "detail": (
+                f"Heartbeat is recent ({relative})."
+                if not status_detail
+                else f"Heartbeat is recent ({relative}). {status_detail}."
+            ),
+        }
+
+    if age_seconds <= WORKER_STALE_AFTER_SECONDS:
+        return {
+            "state": "slow",
+            "label": "Slow",
+            "last_heartbeat": _format_timestamp(heartbeat_dt.isoformat()),
+            "last_heartbeat_relative": relative,
+            "detail": (
+                f"Heartbeat is delayed ({relative})."
+                if not status_detail
+                else f"Heartbeat is delayed ({relative}). {status_detail}."
+            ),
+        }
+
+    return {
+        "state": "stale",
+        "label": "Stale",
+        "last_heartbeat": _format_timestamp(heartbeat_dt.isoformat()),
+        "last_heartbeat_relative": relative,
+        "detail": (
+            f"Worker has not reported recently ({relative})."
+            if not status_detail
+            else f"Worker has not reported recently ({relative}). {status_detail}."
+        ),
+    }
+
+
+def _render_worker_status_badge(worker_view: dict[str, str]) -> str:
+    state = worker_view.get("state")
+    label = html.escape(worker_view.get("label") or "Unknown")
+    if state == "running":
+        return f'<span class="badge badge-ok">{label}</span>'
+    if state == "slow":
+        return f'<span class="badge badge-warn">{label}</span>'
+    if state == "stale":
+        return f'<span class="badge badge-warn">{label}</span>'
+    return f'<span class="badge badge-inactive">{label}</span>'
+
+
+def _build_processing_status_view(
+    *,
+    worker_view: dict[str, str],
+    oauth_configured: bool,
+    last_success_activity: dict[str, Any] | None,
+) -> dict[str, str]:
+    worker_state = worker_view.get("state") or "unknown"
+    if worker_state == "stale":
+        stale_age = worker_view.get("last_heartbeat_relative") or "a while"
+        return {
+            "state": "STALE",
+            "label": "Stale",
+            "headline": f"Stale — worker has not reported in {stale_age}.",
+            "detail": worker_view.get("detail") or "Worker heartbeat is stale.",
+            "last_processed": "-",
+        }
+
+    if not oauth_configured:
+        return {
+            "state": "BLOCKED_BY_CONFIG",
+            "label": "Blocked by Config",
+            "headline": "Blocked — Google OAuth is not configured.",
+            "detail": "Complete GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.",
+            "last_processed": "-",
+        }
+
+    last_success_dt = _parse_iso_utc(str((last_success_activity or {}).get("created_at") or ""))
+    if last_success_dt:
+        age_seconds = (datetime.now(timezone.utc) - last_success_dt).total_seconds()
+        last_processed_display = (
+            f"{_format_timestamp(last_success_dt.isoformat())} ({_format_relative_age_from_seconds(age_seconds)})"
+        )
+        if age_seconds <= PROCESSING_ACTIVE_WINDOW_SECONDS:
+            return {
+                "state": "ACTIVE",
+                "label": "Active",
+                "headline": f"Active — last processed {_format_relative_age_from_seconds(age_seconds)}.",
+                "detail": "System is processing emails normally.",
+                "last_processed": last_processed_display,
+            }
+        if age_seconds <= PROCESSING_LOW_ACTIVITY_WINDOW_SECONDS:
+            return {
+                "state": "LOW_ACTIVITY",
+                "label": "Low Activity",
+                "headline": f"Low activity — last processed {_format_relative_age_from_seconds(age_seconds)}.",
+                "detail": "Processing happened recently, but not in the last hour.",
+                "last_processed": last_processed_display,
+            }
+
+    return {
+        "state": "NO_ACTIVITY",
+        "label": "No Activity",
+        "headline": "No recent activity — no emails processed in the last 24 hours.",
+        "detail": "The system appears configured; inbox volume may be low.",
+        "last_processed": "-",
+    }
+
+
+def _render_processing_status_badge(processing_view: dict[str, str]) -> str:
+    state = processing_view.get("state")
+    label = html.escape(processing_view.get("label") or "Unknown")
+    if state in ("ACTIVE", "LOW_ACTIVITY"):
+        return f'<span class="badge badge-ok">{label}</span>'
+    if state in ("NO_ACTIVITY", "BLOCKED_BY_CONFIG", "STALE"):
+        return f'<span class="badge badge-warn">{label}</span>'
+    return f'<span class="badge badge-inactive">{label}</span>'
+
+
 def _extract_bearer_token(authorization: str | None) -> str | None:
     if not authorization:
         return None
@@ -653,7 +848,7 @@ def _render_login_page(error: str | None = None) -> str:
   <div class="login-shell">
     <section class="card login-card">
       <h1>Support Agent Admin</h1>
-      <p>Sign in with an existing API key to access mailbox management pages.</p>
+      <p>Sign in with <code>ADMIN_API_KEY</code> to access mailbox management pages.</p>
       {error_html}
 
       <form method="post" action="/admin/login">
@@ -666,7 +861,7 @@ def _render_login_page(error: str | None = None) -> str:
         </div>
       </form>
 
-      <p class="footnote">Uses the same API-key validation as protected backend endpoints.</p>
+      <p class="footnote">Admin panel access is intentionally separated from normal API endpoint keys.</p>
     </section>
   </div>
 </body>
@@ -678,23 +873,36 @@ def _render_dashboard_body(
     *,
     mailbox_counts: dict[str, int],
     recent_metrics: dict[str, int],
-    latest_updates: list[GmailMailboxRecord],
+    latest_activity: list[dict[str, Any]],
+    worker_view: dict[str, str],
+    processing_view: dict[str, str],
 ) -> str:
     rows: list[str] = []
-    for mailbox in latest_updates:
+    for item in latest_activity:
+        parse_badge = (
+            '<span class="badge badge-ok">OK</span>'
+            if int(item.get("parse_ok") or 0) == 1
+            else '<span class="badge badge-warn">Fail</span>'
+        )
+        raw_subject = (item.get("subject") or "").strip()
+        subject = raw_subject if raw_subject else "-"
+        if len(subject) > 80:
+            subject = f"{subject[:77]}..."
+
         rows.append(
             "<tr>"
-            f"<td>{html.escape(mailbox.mailbox_email)}</td>"
-            f"<td>{html.escape(mailbox.client_name or '-')}</td>"
-            f"<td>{_render_status_badge(mailbox.active)}</td>"
-            f"<td class=\"text-muted\">{html.escape(_format_timestamp(mailbox.updated_at))}</td>"
+            f"<td>{html.escape(_format_timestamp(str(item.get('created_at') or '')))}</td>"
+            f"<td>{html.escape(str(item.get('source') or '-'))}</td>"
+            f"<td>{html.escape(str(item.get('category') or '-'))}</td>"
+            f"<td>{parse_badge}</td>"
+            f"<td>{html.escape(subject)}</td>"
             "</tr>"
         )
 
     latest_rows_html = "".join(rows)
     if not latest_rows_html:
         latest_rows_html = (
-            '<tr><td colspan="4"><div class="empty">No Gmail mailboxes have been connected yet.</div></td></tr>'
+            f'<tr><td colspan="5"><div class="empty">No processing activity in the last {DASHBOARD_ACTIVITY_HOURS} hours.</div></td></tr>'
         )
 
     total_mailboxes = int(mailbox_counts.get("total", 0))
@@ -733,19 +941,38 @@ def _render_dashboard_body(
       </div>
     </div>
 
+    <div class="card" style="box-shadow:none; margin-bottom:12px;">
+      <div class="card-header">
+        <h2>Worker Liveness</h2>
+        <p>Latest worker heartbeat from the polling loop.</p>
+      </div>
+      <div class="content">
+        <p style="margin:0 0 8px;">
+          {_render_worker_status_badge(worker_view)}
+          <span class="text-muted" style="margin-left:8px;">Last heartbeat: {html.escape(worker_view.get("last_heartbeat") or "-")} ({html.escape(worker_view.get("last_heartbeat_relative") or "-")})</span>
+        </p>
+        <p class="text-muted" style="margin:0;">{html.escape(worker_view.get("detail") or "-")}</p>
+        <p class="text-muted" style="margin:8px 0 0;">
+          {_render_processing_status_badge(processing_view)}
+          <span style="margin-left:8px;">{html.escape(processing_view.get("headline") or "-")}</span>
+        </p>
+      </div>
+    </div>
+
     <div class="card" style="box-shadow:none;">
       <div class="card-header">
-        <h2>Latest Mailbox Updates</h2>
-        <p>Most recently updated mailbox records.</p>
+        <h2>Latest Processing Activity</h2>
+        <p>Most recent support processing events.</p>
       </div>
       <div class="content table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Mailbox Email</th>
-              <th>Client Name</th>
-              <th>Status</th>
-              <th>Updated</th>
+              <th>Timestamp</th>
+              <th>Source</th>
+              <th>Category</th>
+              <th>Parse</th>
+              <th>Subject</th>
             </tr>
           </thead>
           <tbody>
@@ -881,6 +1108,8 @@ def _render_logs_body(
     category: str | None,
     parse_ok: int | None,
     hours: int,
+    window_has_any_logs: bool,
+    filters_active: bool,
 ) -> str:
     selected_parse_ok = "" if parse_ok is None else str(parse_ok)
     selected_category = category or ""
@@ -909,7 +1138,16 @@ def _render_logs_body(
 
     table_body = "".join(rows)
     if not table_body:
-        table_body = '<tr><td colspan="7"><div class="empty">No logs matched the selected filters.</div></td></tr>'
+        if not window_has_any_logs:
+            empty_message = (
+                f"No support logs were recorded in the last {hours} hours. "
+                "This may mean the worker is idle or not running."
+            )
+        elif filters_active:
+            empty_message = "No logs match the current category/parse filters. Try clearing one or both filters."
+        else:
+            empty_message = "No logs are available for this time window yet."
+        table_body = f'<tr><td colspan="7"><div class="empty">{html.escape(empty_message)}</div></td></tr>'
 
     return f"""
 <section class="card">
@@ -965,23 +1203,81 @@ def _render_logs_body(
 """
 
 
-def _render_health_body(*, mailbox_counts: dict[str, int]) -> str:
-    oauth_client_id = bool((os.getenv("GOOGLE_CLIENT_ID") or "").strip())
-    oauth_client_secret = bool((os.getenv("GOOGLE_CLIENT_SECRET") or "").strip())
-    oauth_redirect = bool((os.getenv("GOOGLE_REDIRECT_URI") or "").strip())
+def _render_health_body(
+    *,
+    mailbox_counts: dict[str, int],
+    worker_view: dict[str, str],
+    recent_metrics: dict[str, int],
+    last_success_activity: dict[str, Any] | None,
+) -> str:
+    oauth_status = _get_google_oauth_config_status()
+    oauth_configured = bool(oauth_status.get("configured"))
+    oauth_client_id = bool(oauth_status.get("has_client_id"))
+    oauth_client_secret = bool(oauth_status.get("has_client_secret"))
+    oauth_redirect = bool(oauth_status.get("has_redirect_uri"))
     oauth_state_secret = bool((os.getenv("GOOGLE_OAUTH_STATE_SECRET") or "").strip())
     openai_key = bool((os.getenv("OPENAI_API_KEY") or "").strip())
     auth_key_present = bool((os.getenv("DEMO_API_KEY") or os.getenv("API_KEY") or "").strip())
     auth_hmac_secret = bool((os.getenv("API_KEY_HMAC_SECRET") or "").strip())
     has_mailboxes = int(mailbox_counts.get("total", 0)) > 0
 
-    oauth_configured = oauth_client_id and oauth_client_secret and oauth_redirect
+    recent_total = int(recent_metrics.get("recent_total", 0))
+    recent_errors = int(recent_metrics.get("recent_errors", 0))
+    processing_view = _build_processing_status_view(
+        worker_view=worker_view,
+        oauth_configured=oauth_configured,
+        last_success_activity=last_success_activity,
+    )
+
+    if not oauth_configured:
+        logs_badge = '<span class="badge badge-warn">Blocked by Config</span>'
+        logs_message = "No activity — Gmail processing is not configured (OAuth incomplete)."
+    elif recent_total > 0:
+        logs_badge = '<span class="badge badge-ok">Active</span>'
+        logs_message = "Processed requests were recorded in the last 24 hours."
+    else:
+        logs_badge = '<span class="badge badge-warn">No Activity</span>'
+        logs_message = "No emails processed in the last 24 hours."
 
     return f"""
 <div class="stack">
   <section class="card">
     <div class="card-header">
-      <h2>Runtime Checks</h2>
+      <h2>Runtime Visibility</h2>
+      <p>Quick signals that show whether the system is actively processing.</p>
+    </div>
+    <div class="content status-grid">
+      <article class="status-item">
+        <h3>Worker Status</h3>
+        {_render_worker_status_badge(worker_view)}
+        <p>Last heartbeat: {html.escape(worker_view.get("last_heartbeat") or "-")} ({html.escape(worker_view.get("last_heartbeat_relative") or "-")})</p>
+        <p style="margin-top:8px;">{html.escape(worker_view.get("detail") or "-")}</p>
+      </article>
+      <article class="status-item">
+        <h3>Last Successful Processing</h3>
+        {_render_processing_status_badge(processing_view)}
+        <p>{html.escape(processing_view.get("headline") or "-")}</p>
+        <p style="margin-top:8px;">State: <strong>{html.escape(processing_view.get("state") or "UNKNOWN")}</strong></p>
+        <p style="margin-top:8px;">Last processed: <strong>{html.escape(processing_view.get("last_processed") or "-")}</strong></p>
+        <p style="margin-top:8px;">{html.escape(processing_view.get("detail") or "-")}</p>
+      </article>
+      <article class="status-item">
+        <h3>Recent Support Logs (24h)</h3>
+        {logs_badge}
+        <p>Count: <strong>{recent_total}</strong></p>
+        <p style="margin-top:8px;">{html.escape(logs_message)}</p>
+      </article>
+      <article class="status-item">
+        <h3>Recent Errors (24h)</h3>
+        {_render_generic_status_badge(recent_errors == 0, ok_text="No Errors", warn_text="Errors Present")}
+        <p>Count: <strong>{recent_errors}</strong></p>
+      </article>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Configuration Checks</h2>
       <p>Lightweight operational checks. Secret values are never displayed.</p>
     </div>
     <div class="content status-grid">
@@ -1086,12 +1382,27 @@ def admin_logout():
 def admin_dashboard(request: Request, client=Depends(require_admin_auth)):
     mailbox_counts = fetch_gmail_mailbox_counts()
     recent_metrics = fetch_recent_support_metrics(hours=RECENT_LOG_WINDOW_HOURS)
-    latest_updates = list_gmail_mailboxes(limit=LATEST_MAILBOX_UPDATES_LIMIT)
+    latest_activity = fetch_logs(
+        limit=DASHBOARD_ACTIVITY_LIMIT,
+        created_after=_build_logs_filter_created_after(DASHBOARD_ACTIVITY_HOURS),
+    )
+    worker_runtime = fetch_runtime_status(WORKER_COMPONENT_NAME)
+    worker_view = _build_worker_runtime_view(worker_runtime)
+    oauth_status = _get_google_oauth_config_status()
+    last_success_logs = fetch_logs(limit=1, parse_ok=1)
+    last_success_activity = last_success_logs[0] if last_success_logs else None
+    processing_view = _build_processing_status_view(
+        worker_view=worker_view,
+        oauth_configured=bool(oauth_status.get("configured")),
+        last_success_activity=last_success_activity,
+    )
 
     body_html = _render_dashboard_body(
         mailbox_counts=mailbox_counts,
         recent_metrics=recent_metrics,
-        latest_updates=latest_updates,
+        latest_activity=latest_activity,
+        worker_view=worker_view,
+        processing_view=processing_view,
     )
 
     page = _render_layout(
@@ -1141,13 +1452,16 @@ def admin_logs(
     normalized_hours = max(1, min(hours, 24 * 30))
     normalized_parse_ok = int(parse_ok) if parse_ok in ("0", "1") else None
     normalized_category = (category or "").strip() or None
+    created_after = _build_logs_filter_created_after(normalized_hours)
 
     logs = fetch_logs(
         limit=normalized_limit,
         parse_ok=normalized_parse_ok,
         category=normalized_category,
-        created_after=_build_logs_filter_created_after(normalized_hours),
+        created_after=created_after,
     )
+    window_has_any_logs = bool(fetch_logs(limit=1, created_after=created_after))
+    filters_active = normalized_parse_ok is not None or normalized_category is not None
 
     body_html = _render_logs_body(
         items=logs,
@@ -1155,6 +1469,8 @@ def admin_logs(
         category=normalized_category,
         parse_ok=normalized_parse_ok,
         hours=normalized_hours,
+        window_has_any_logs=window_has_any_logs,
+        filters_active=filters_active,
     )
 
     page = _render_layout(
@@ -1171,7 +1487,17 @@ def admin_logs(
 @router.get("/health", response_class=HTMLResponse)
 def admin_health(request: Request, client=Depends(require_admin_auth)):
     mailbox_counts = fetch_gmail_mailbox_counts()
-    body_html = _render_health_body(mailbox_counts=mailbox_counts)
+    recent_metrics = fetch_recent_support_metrics(hours=RECENT_LOG_WINDOW_HOURS)
+    worker_runtime = fetch_runtime_status(WORKER_COMPONENT_NAME)
+    worker_view = _build_worker_runtime_view(worker_runtime)
+    last_success_logs = fetch_logs(limit=1, parse_ok=1)
+    last_success_activity = last_success_logs[0] if last_success_logs else None
+    body_html = _render_health_body(
+        mailbox_counts=mailbox_counts,
+        worker_view=worker_view,
+        recent_metrics=recent_metrics,
+        last_success_activity=last_success_activity,
+    )
 
     page = _render_layout(
         title="Admin Health",

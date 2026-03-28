@@ -23,6 +23,7 @@ if PROJECT_ROOT not in sys.path:
 TOKEN_PATH = os.path.join(PROJECT_ROOT, "token.json")
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
+from app.database.db import init_db, upsert_runtime_status
 from app.services.mailboxes import GmailMailbox, load_active_gmail_mailboxes, update_mailbox_tokens
 
 logging.basicConfig(
@@ -64,6 +65,7 @@ SKIPPED_LABEL_NAME = "AI_SKIPPED"
 
 MAX_MESSAGE_CHARS = 12000
 MY_EMAIL = os.getenv("MY_EMAIL", "adam.pawel.siwonia@gmail.com")
+WORKER_COMPONENT_NAME = "worker"
 
 
 def log_message_event(action: str, message_data: dict | None = None, **extra) -> None:
@@ -81,6 +83,19 @@ def log_message_event(action: str, message_data: dict | None = None, **extra) ->
         parts.append(f"{key}={value!r}")
 
     logger.info(" | ".join(parts))
+
+
+def _record_worker_heartbeat(*, status_text: str, details: str | None = None) -> None:
+    heartbeat_at = datetime.now(timezone.utc).isoformat()
+    try:
+        upsert_runtime_status(
+            component=WORKER_COMPONENT_NAME,
+            last_heartbeat_at=heartbeat_at,
+            status_text=status_text,
+            details=details,
+        )
+    except Exception as exc:
+        logger.warning("Failed to write worker heartbeat: %r", exc)
 
 
 def get_legacy_gmail_service():
@@ -765,6 +780,9 @@ def main():
     if not DEMO_API_KEY:
         raise RuntimeError("Missing DEMO_API_KEY in .env")
 
+    # Ensure required SQLite tables (including runtime_status heartbeat table) exist.
+    init_db()
+
     legacy_service = None
     legacy_processed_label_id = None
     legacy_skipped_label_id = None
@@ -780,11 +798,14 @@ def main():
 
     while True:
         cycle_started_at = time.time()
+        heartbeat_status = "running"
+        heartbeat_details = "starting_cycle"
 
         try:
             active_mailboxes = load_active_gmail_mailboxes()
 
             if active_mailboxes:
+                heartbeat_details = f"mode=db_mailboxes active_mailboxes={len(active_mailboxes)}"
                 logger.info("Loaded %s active mailbox(es) from DB", len(active_mailboxes))
                 for mailbox in active_mailboxes:
                     try:
@@ -804,6 +825,7 @@ def main():
                             e,
                         )
             else:
+                heartbeat_details = "mode=legacy_fallback active_mailboxes=0"
                 try:
                     if legacy_service is None:
                         logger.info("No active DB mailboxes found; using legacy token.json fallback")
@@ -822,6 +844,8 @@ def main():
                         source="gmail",
                     )
                 except RefreshError:
+                    heartbeat_status = "error"
+                    heartbeat_details = "mode=legacy_fallback refresh_error"
                     legacy_service = None
                     legacy_processed_label_id = None
                     legacy_skipped_label_id = None
@@ -832,6 +856,8 @@ def main():
                         legacy_token_error_logged = True
 
         except HttpError as e:
+            heartbeat_status = "error"
+            heartbeat_details = f"gmail_http_error type={type(e).__name__}"
             logger.exception("Worker cycle Gmail API error: %r", e)
 
             # Legacy fallback session can expire; force re-auth for next cycle.
@@ -840,12 +866,17 @@ def main():
             legacy_skipped_label_id = None
 
         except Exception as e:
+            heartbeat_status = "error"
+            heartbeat_details = f"worker_loop_error type={type(e).__name__}"
             logger.exception("Worker loop error: %r", e)
 
             # Keep legacy fallback resilient if its local session failed.
             legacy_service = None
             legacy_processed_label_id = None
             legacy_skipped_label_id = None
+
+        finally:
+            _record_worker_heartbeat(status_text=heartbeat_status, details=heartbeat_details)
 
         elapsed = time.time() - cycle_started_at
         sleep_for = max(0, POLL_INTERVAL_SECONDS - elapsed)

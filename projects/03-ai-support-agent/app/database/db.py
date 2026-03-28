@@ -147,3 +147,58 @@ def fetch_recent_support_metrics(hours: int = 24) -> dict[str, int]:
     recent_errors = int((row["error_count"] or 0) if row else 0)
     return {"recent_total": recent_total, "recent_errors": recent_errors}
 
+
+def upsert_runtime_status(
+    *,
+    component: str,
+    last_heartbeat_at: str,
+    status_text: str | None = None,
+    details: str | None = None,
+) -> None:
+    normalized_component = (component or "").strip().lower()
+    if not normalized_component:
+        raise ValueError("component is required")
+
+    heartbeat = (last_heartbeat_at or "").strip()
+    if not heartbeat:
+        raise ValueError("last_heartbeat_at is required")
+
+    query = """
+    INSERT INTO runtime_status (component, last_heartbeat_at, status, details, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(component) DO UPDATE SET
+      last_heartbeat_at = excluded.last_heartbeat_at,
+      status = excluded.status,
+      details = excluded.details,
+      updated_at = excluded.updated_at
+    """
+
+    with get_conn() as conn:
+        conn.execute(
+            query,
+            (
+                normalized_component,
+                heartbeat,
+                (status_text or "").strip() or None,
+                (details or "").strip() or None,
+                heartbeat,
+            ),
+        )
+        conn.commit()
+
+
+def fetch_runtime_status(component: str) -> dict[str, Any] | None:
+    normalized_component = (component or "").strip().lower()
+    if not normalized_component:
+        raise ValueError("component is required")
+
+    query = """
+    SELECT component, last_heartbeat_at, status, details, updated_at
+    FROM runtime_status
+    WHERE component = ?
+    """
+
+    with get_conn() as conn:
+        row = conn.execute(query, (normalized_component,)).fetchone()
+        return dict(row) if row else None
+

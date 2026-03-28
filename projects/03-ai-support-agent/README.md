@@ -194,6 +194,12 @@ Server-rendered internal admin pages are available under `/admin`:
 * `POST /admin/mailboxes/{mailbox_id}/activate` - mark mailbox active
 * `POST /admin/mailboxes/{mailbox_id}/deactivate` - mark mailbox inactive
 
+Runtime visibility:
+
+* Worker loop writes heartbeat rows to `runtime_status`.
+* Dashboard and Health pages show worker liveness (Running / Stale / Unknown).
+* Dashboard includes latest processing activity from `support_logs`.
+
 Auth model:
 
 * `/admin` routes are protected by a dedicated `ADMIN_API_KEY`.
