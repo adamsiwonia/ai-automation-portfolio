@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import os
 import re
 import secrets
@@ -11,7 +12,7 @@ from typing import Optional
 from urllib.parse import urlencode
 
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.admin_panel import router as admin_router
 from app.core.auth import require_api_key
@@ -40,6 +41,10 @@ from app.services.mailboxes import (
     DEFAULT_PROCESSED_LABEL,
     DEFAULT_SKIPPED_LABEL,
     upsert_gmail_mailbox_oauth,
+)
+from app.services.client_workspaces import (
+    get_client_workspace_by_id,
+    get_client_workspace_by_token,
 )
 from app.web_demo import router as web_demo_router
 
@@ -229,6 +234,69 @@ def _build_admin_notice_redirect(*, path: str, notice: str, is_error: bool = Fal
     )
 
 
+def _build_connect_gmail_page(
+    *,
+    workspace_name: str,
+    start_url: str,
+    info_message: str | None = None,
+) -> str:
+    safe_workspace_name = html.escape(workspace_name)
+    safe_start_url = html.escape(start_url)
+    info_block = (
+        f"<p>{html.escape(info_message)}</p>"
+        if info_message
+        else ""
+    )
+    return (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\" />"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />"
+        "<title>Connect Gmail</title></head><body>"
+        "<main style=\"max-width:560px;margin:64px auto;padding:0 16px;font-family:Segoe UI,Arial,sans-serif;\">"
+        "<section style=\"border:1px solid #d9e2ec;border-radius:12px;padding:20px;background:#fff;\">"
+        "<h1 style=\"margin:0 0 10px;\">Connect your Gmail inbox</h1>"
+        f"<p>This onboarding link is for <strong>{safe_workspace_name}</strong>.</p>"
+        f"{info_block}"
+        "<p>Click below to continue with Google OAuth consent.</p>"
+        f"<a href=\"{safe_start_url}\" style=\"display:inline-block;padding:10px 14px;border:1px solid #b7cdfb;border-radius:8px;background:#e0ecff;color:#1e40af;text-decoration:none;font-weight:700;\">Connect Gmail</a>"
+        "</section></main></body></html>"
+    )
+
+
+def _build_connect_result_page(*, title: str, message: str, is_error: bool) -> str:
+    safe_title = html.escape(title)
+    safe_message = html.escape(message)
+    status_text = "Error" if is_error else "Success"
+    status_color = "#991b1b" if is_error else "#166534"
+    return (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\" />"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />"
+        f"<title>{safe_title}</title></head><body>"
+        "<main style=\"max-width:560px;margin:64px auto;padding:0 16px;font-family:Segoe UI,Arial,sans-serif;\">"
+        "<section style=\"border:1px solid #d9e2ec;border-radius:12px;padding:20px;background:#fff;\">"
+        f"<h1 style=\"margin:0 0 10px;\">{safe_title}</h1>"
+        f"<p style=\"margin:0 0 10px;color:{status_color};font-weight:700;\">{status_text}</p>"
+        f"<p>{safe_message}</p>"
+        "</section></main></body></html>"
+    )
+
+
+def _parse_workspace_id(raw_value: object) -> int | None:
+    if raw_value is None:
+        return None
+    try:
+        value = int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _state_indicates_onboarding(payload: dict[str, object]) -> bool:
+    flow_name = str(payload.get("oauth_flow") or "").strip().lower()
+    if flow_name == "onboarding":
+        return True
+    return _parse_workspace_id(payload.get("client_workspace_id")) is not None
+
+
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
@@ -410,12 +478,47 @@ async def generate(req: GenerateRequest, request: Request):
     }
 
 
+@app.get("/connect/{onboarding_token}", response_class=HTMLResponse)
+def connect_workspace_mailbox(onboarding_token: str):
+    workspace = get_client_workspace_by_token(onboarding_token, require_active=True)
+    if not workspace:
+        return HTMLResponse(
+            _build_connect_result_page(
+                title="Onboarding link invalid",
+                message="This onboarding link is invalid, expired, or inactive.",
+                is_error=True,
+            ),
+            status_code=404,
+        )
+
+    connect_query = urlencode(
+        {
+            "redirect_to_google": 1,
+            "onboarding_token": onboarding_token,
+        }
+    )
+    connect_url = f"/auth/google/start?{connect_query}"
+    info_message = None
+    contact_email = str(workspace.get("contact_email") or "").strip()
+    if contact_email:
+        info_message = f"If you have questions, contact {contact_email}."
+
+    return HTMLResponse(
+        _build_connect_gmail_page(
+            workspace_name=str(workspace.get("name") or "Client workspace"),
+            start_url=connect_url,
+            info_message=info_message,
+        )
+    )
+
+
 @app.get("/auth/google/start")
 def auth_google_start(
     request: Request,
     client_name: Optional[str] = Query(default=None, min_length=1, max_length=200),
     processed_label: str = Query(default=DEFAULT_PROCESSED_LABEL, min_length=1, max_length=100),
     skipped_label: str = Query(default=DEFAULT_SKIPPED_LABEL, min_length=1, max_length=100),
+    onboarding_token: Optional[str] = Query(default=None, max_length=255),
     post_connect_redirect: Optional[str] = Query(default=None, max_length=200),
     redirect_to_google: bool = Query(default=False),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
@@ -424,7 +527,15 @@ def auth_google_start(
     db=Depends(get_db),
 ):
     authenticated_client_name = None
-    if redirect_to_google:
+    onboarding_workspace = None
+    normalized_onboarding_token = (onboarding_token or "").strip() or None
+
+    if normalized_onboarding_token:
+        onboarding_workspace = get_client_workspace_by_token(normalized_onboarding_token, require_active=True)
+        if not onboarding_workspace:
+            raise HTTPException(status_code=404, detail="Onboarding token is invalid or inactive")
+        authenticated_client_name = str(onboarding_workspace.get("name") or "").strip() or "onboarding-workspace"
+    elif redirect_to_google:
         # Browser-based admin flow uses dedicated ADMIN_API_KEY from the admin cookie.
         _validate_admin_api_key(admin_api_key)
         authenticated_client_name = "admin-panel"
@@ -459,9 +570,13 @@ def auth_google_start(
         "processed_label": processed_label.strip(),
         "skipped_label": skipped_label.strip(),
     }
-    safe_post_connect_redirect = _sanitize_admin_redirect_path(post_connect_redirect)
-    if safe_post_connect_redirect:
-        state_payload["post_connect_redirect"] = safe_post_connect_redirect
+    if onboarding_workspace:
+        state_payload["oauth_flow"] = "onboarding"
+        state_payload["client_workspace_id"] = str(onboarding_workspace["id"])
+    else:
+        safe_post_connect_redirect = _sanitize_admin_redirect_path(post_connect_redirect)
+        if safe_post_connect_redirect:
+            state_payload["post_connect_redirect"] = safe_post_connect_redirect
 
     state = create_oauth_state(
         state_payload,
@@ -469,7 +584,7 @@ def auth_google_start(
     )
 
     authorization_url = build_google_auth_url(config, state)
-    if redirect_to_google:
+    if redirect_to_google or onboarding_workspace is not None:
         return RedirectResponse(url=authorization_url, status_code=303)
 
     return {
@@ -486,18 +601,49 @@ def auth_google_callback(
     error: Optional[str] = Query(default=None),
     error_description: Optional[str] = Query(default=None),
 ):
-    def maybe_redirect_admin_error(message: str) -> RedirectResponse | None:
+    def _parse_state_hint() -> dict[str, object] | None:
         state_secret_candidate = (os.getenv("GOOGLE_OAUTH_STATE_SECRET") or os.getenv("GOOGLE_CLIENT_SECRET") or "").strip()
         if not state or not state_secret_candidate:
             return None
         try:
-            payload = parse_oauth_state(state, state_secret_candidate)
+            parsed = parse_oauth_state(state, state_secret_candidate)
         except Exception:
             return None
-        redirect_path = _sanitize_admin_redirect_path(payload.get("post_connect_redirect"))
+        return parsed
+
+    state_hint = _parse_state_hint()
+
+    def maybe_redirect_admin_error(message: str) -> RedirectResponse | None:
+        if not state_hint:
+            return None
+        redirect_path = _sanitize_admin_redirect_path(state_hint.get("post_connect_redirect"))
         if not redirect_path:
             return None
         return _build_admin_notice_redirect(path=redirect_path, notice=message, is_error=True)
+
+    def maybe_render_onboarding_error(message: str, *, status_code: int) -> HTMLResponse | None:
+        if not state_hint or not _state_indicates_onboarding(state_hint):
+            return None
+        workspace_name = str(state_hint.get("client_name") or "Client workspace").strip() or "Client workspace"
+        return HTMLResponse(
+            _build_connect_result_page(
+                title="Gmail connection failed",
+                message=f"{workspace_name}: {message}",
+                is_error=True,
+            ),
+            status_code=status_code,
+        )
+
+    def handle_oauth_error(detail: str, *, status_code: int):
+        redirect_response = maybe_redirect_admin_error(detail)
+        if redirect_response:
+            return redirect_response
+
+        onboarding_response = maybe_render_onboarding_error(detail, status_code=status_code)
+        if onboarding_response:
+            return onboarding_response
+
+        raise HTTPException(status_code=status_code, detail=detail)
 
     if error:
         if error == "access_denied":
@@ -506,17 +652,11 @@ def auth_google_callback(
             detail = f"Google OAuth returned an error: {error}"
         if error_description:
             detail = f"{detail} ({error_description})"
-        redirect_response = maybe_redirect_admin_error(detail)
-        if redirect_response:
-            return redirect_response
-        raise HTTPException(status_code=400, detail=detail)
+        return handle_oauth_error(detail, status_code=400)
 
     if not code:
         detail = "Missing OAuth code in callback."
-        redirect_response = maybe_redirect_admin_error(detail)
-        if redirect_response:
-            return redirect_response
-        raise HTTPException(status_code=400, detail=detail)
+        return handle_oauth_error(detail, status_code=400)
     if not state:
         raise HTTPException(status_code=400, detail="Missing OAuth state in callback.")
 
@@ -524,29 +664,32 @@ def auth_google_callback(
         config = get_google_oauth_config()
     except GoogleOAuthConfigError as exc:
         detail = str(exc)
-        redirect_response = maybe_redirect_admin_error(detail)
-        if redirect_response:
-            return redirect_response
-        raise HTTPException(status_code=500, detail=detail)
+        return handle_oauth_error(detail, status_code=500)
 
     state_secret = (os.getenv("GOOGLE_OAUTH_STATE_SECRET") or config.client_secret).strip()
     if not state_secret:
         detail = "OAuth state signing secret is not configured"
-        redirect_response = maybe_redirect_admin_error(detail)
-        if redirect_response:
-            return redirect_response
-        raise HTTPException(status_code=500, detail=detail)
+        return handle_oauth_error(detail, status_code=500)
 
     try:
         state_payload = parse_oauth_state(state, state_secret)
     except GoogleOAuthStateError as exc:
         detail = f"Invalid OAuth state: {exc}"
-        redirect_response = maybe_redirect_admin_error(detail)
-        if redirect_response:
-            return redirect_response
-        raise HTTPException(status_code=400, detail=detail)
+        return handle_oauth_error(detail, status_code=400)
 
     admin_redirect_path = _sanitize_admin_redirect_path(state_payload.get("post_connect_redirect"))
+    workspace_id = _parse_workspace_id(state_payload.get("client_workspace_id"))
+    onboarding_mode = _state_indicates_onboarding(state_payload)
+    workspace_record = get_client_workspace_by_id(workspace_id) if workspace_id else None
+
+    if onboarding_mode and not workspace_id:
+        return handle_oauth_error("Onboarding state is missing workspace id.", status_code=400)
+
+    if onboarding_mode and workspace_id and not workspace_record:
+        return handle_oauth_error("Onboarding workspace was not found.", status_code=404)
+
+    if onboarding_mode and workspace_record and not bool(workspace_record.get("active")):
+        return handle_oauth_error("Onboarding workspace is inactive.", status_code=403)
 
     try:
         token_payload = exchange_google_code(config, code)
@@ -554,6 +697,15 @@ def auth_google_callback(
         detail = str(exc)
         if admin_redirect_path:
             return _build_admin_notice_redirect(path=admin_redirect_path, notice=detail, is_error=True)
+        if onboarding_mode:
+            return HTMLResponse(
+                _build_connect_result_page(
+                    title="Gmail connection failed",
+                    message=detail,
+                    is_error=True,
+                ),
+                status_code=502,
+            )
         raise HTTPException(status_code=502, detail=detail)
 
     access_token = (token_payload.get("access_token") or "").strip()
@@ -567,9 +719,27 @@ def auth_google_callback(
         detail = str(exc)
         if admin_redirect_path:
             return _build_admin_notice_redirect(path=admin_redirect_path, notice=detail, is_error=True)
+        if onboarding_mode:
+            return HTMLResponse(
+                _build_connect_result_page(
+                    title="Gmail connection failed",
+                    message=detail,
+                    is_error=True,
+                ),
+                status_code=502,
+            )
         raise HTTPException(status_code=502, detail=detail)
 
-    effective_client_name = (str(state_payload.get("client_name") or "") or mailbox_email).strip() or mailbox_email
+    workspace_name = (
+        str(workspace_record.get("name") or "").strip()
+        if isinstance(workspace_record, dict)
+        else ""
+    )
+    effective_client_name = (
+        workspace_name
+        or (str(state_payload.get("client_name") or "") or mailbox_email).strip()
+        or mailbox_email
+    )
     effective_processed_label = (
         str(state_payload.get("processed_label") or DEFAULT_PROCESSED_LABEL).strip() or DEFAULT_PROCESSED_LABEL
     )
@@ -580,6 +750,7 @@ def auth_google_callback(
     try:
         upsert_result = upsert_gmail_mailbox_oauth(
             client_name=effective_client_name,
+            client_workspace_id=workspace_id if onboarding_mode else None,
             mailbox_email=mailbox_email,
             access_token=access_token,
             refresh_token=refresh_token,
@@ -593,11 +764,29 @@ def auth_google_callback(
         detail = str(exc)
         if admin_redirect_path:
             return _build_admin_notice_redirect(path=admin_redirect_path, notice=detail, is_error=True)
+        if onboarding_mode:
+            return HTMLResponse(
+                _build_connect_result_page(
+                    title="Gmail connection failed",
+                    message=detail,
+                    is_error=True,
+                ),
+                status_code=400,
+            )
         raise HTTPException(status_code=400, detail=detail)
     except Exception as exc:
         detail = f"Failed to persist Gmail mailbox: {exc}"
         if admin_redirect_path:
             return _build_admin_notice_redirect(path=admin_redirect_path, notice=detail, is_error=True)
+        if onboarding_mode:
+            return HTMLResponse(
+                _build_connect_result_page(
+                    title="Gmail connection failed",
+                    message=detail,
+                    is_error=True,
+                ),
+                status_code=500,
+            )
         raise HTTPException(status_code=500, detail=detail)
 
     created = bool(upsert_result.get("created"))
@@ -606,6 +795,17 @@ def auth_google_callback(
         action = "connected" if created else "updated"
         notice = f"Mailbox {mailbox_email_value} {action} successfully."
         return _build_admin_notice_redirect(path=admin_redirect_path, notice=notice, is_error=False)
+
+    if onboarding_mode:
+        mailbox_email_value = str(upsert_result.get("mailbox_email") or mailbox_email)
+        action_text = "connected" if created else "updated"
+        return HTMLResponse(
+            _build_connect_result_page(
+                title="Gmail connected successfully",
+                message=f"{mailbox_email_value} was {action_text} and linked to {effective_client_name}.",
+                is_error=False,
+            )
+        )
 
     return {
         "status": "connected",

@@ -39,6 +39,7 @@ All responses are draft-only — nothing is sent automatically.
 * EN / PL interface in demo
 * Structured output validation (safe LLM usage)
 * Gmail integration with automatic draft creation
+* Minimal self-serve Gmail onboarding links per client workspace
 * Full request logging and observability
 * Lightweight server-rendered admin panel for mailbox overview and activate/deactivate controls
 
@@ -151,6 +152,7 @@ Google OAuth mailbox connect endpoints:
 
 * `GET /auth/google/start` (returns authorization URL)
 * `GET /auth/google/callback` (handles code exchange and upserts `gmail_mailboxes`)
+* `GET /connect/{onboarding_token}` (client-facing onboarding page that starts Gmail OAuth for one workspace)
 
 ---
 
@@ -188,9 +190,10 @@ Server-rendered internal admin pages are available under `/admin`:
 
 * `GET /admin` - admin entry/login page
 * `GET /admin/dashboard` - mailbox + support activity overview
-* `GET /admin/mailboxes` - mailbox table with status/action controls
+* `GET /admin/mailboxes` - workspace onboarding links + mailbox table with status/action controls
 * `GET /admin/logs` - support log table with lightweight filters
 * `GET /admin/health` - operational health/config checks (no secret values)
+* `POST /admin/workspaces/create` - create a lightweight client workspace and onboarding token
 * `POST /admin/mailboxes/{mailbox_id}/activate` - mark mailbox active
 * `POST /admin/mailboxes/{mailbox_id}/deactivate` - mark mailbox inactive
 
@@ -211,6 +214,18 @@ Gmail connect flow from admin:
 * Use the Connect Gmail form on `/admin/mailboxes` (redirect-based OAuth flow).
 * It starts via `GET /auth/google/start?...&redirect_to_google=1`.
 * Callback (`GET /auth/google/callback`) preserves JSON behavior by default, and redirects back to admin with a notice when admin redirect metadata is present in OAuth state.
+
+Self-serve client onboarding flow (v1):
+
+* Admin creates a workspace in `/admin/mailboxes` and gets a unique `/connect/{token}` link.
+* Client opens the link and clicks Connect Gmail.
+* OAuth callback links the Gmail mailbox to that workspace (`gmail_mailboxes.client_workspace_id`).
+* Existing manual/admin OAuth connect still works unchanged.
+
+Workspace schema notes:
+
+* `client_workspaces` stores `name`, optional `contact_email`, `onboarding_token`, timestamps, and `active`.
+* `gmail_mailboxes.client_workspace_id` is optional, so legacy rows continue to work.
 
 Notes:
 
@@ -275,6 +290,8 @@ GOOGLE_OAUTH_SCOPES=https://www.googleapis.com/auth/gmail.modify https://www.goo
 GOOGLE_OAUTH_STATE_SECRET=change_me
 ```
 
+No new environment variables are required for workspace onboarding in v1.
+
 Run backend:
 
 ```bash
@@ -307,7 +324,7 @@ curl -H "X-API-Key: your_internal_api_key" "http://127.0.0.1:8000/auth/google/st
 
 ## 🛣️ Roadmap
 
-* multi-client support
+* richer workspace lifecycle controls (token rotation/deactivation UX)
 * retry logic
 * conversation memory
 * Docker deployment

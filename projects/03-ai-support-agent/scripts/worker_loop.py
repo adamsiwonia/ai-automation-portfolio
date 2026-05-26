@@ -750,8 +750,8 @@ def process_inbox(
     )
 
 
-def _build_support_source(client_name: str, mailbox_email: str) -> str:
-    candidate = (client_name or mailbox_email or "unknown").strip().lower()
+def _build_support_source(client_name: str, mailbox_email: str, workspace_name: str | None = None) -> str:
+    candidate = (workspace_name or client_name or mailbox_email or "unknown").strip().lower()
     normalized = re.sub(r"[^a-z0-9._-]+", "_", candidate).strip("_")
     return f"gmail:{normalized or 'unknown'}"
 
@@ -759,7 +759,20 @@ def _build_support_source(client_name: str, mailbox_email: str) -> str:
 def process_db_mailbox(mailbox: GmailMailbox) -> None:
     label_processed = mailbox.processed_label or PROCESSED_LABEL_NAME
     label_skipped = mailbox.skipped_label or SKIPPED_LABEL_NAME
-    source = _build_support_source(mailbox.client_name, mailbox.mailbox_email)
+    source = _build_support_source(
+        mailbox.client_name,
+        mailbox.mailbox_email,
+        workspace_name=mailbox.client_workspace_name,
+    )
+
+    logger.info(
+        "Processing DB mailbox | id=%s | mailbox=%s | workspace_id=%s | workspace=%s | source=%s",
+        mailbox.id,
+        mailbox.mailbox_email,
+        mailbox.client_workspace_id,
+        mailbox.client_workspace_name or mailbox.client_name,
+        source,
+    )
 
     service = get_db_mailbox_gmail_service(mailbox)
     processed_label_id = ensure_label(service, label_processed)

@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 class GmailMailbox:
     id: int
     client_name: str
+    client_workspace_id: int | None
+    client_workspace_name: str | None
     mailbox_email: str
     access_token: str
     refresh_token: str
@@ -39,6 +41,8 @@ class GmailMailbox:
 class GmailMailboxRecord:
     id: int
     client_name: str
+    client_workspace_id: int | None
+    client_workspace_name: str | None
     mailbox_email: str
     processed_label: str
     skipped_label: str
@@ -85,21 +89,24 @@ def _parse_scopes(raw_scopes: str | None) -> list[str]:
 def load_active_gmail_mailboxes() -> list[GmailMailbox]:
     query = """
     SELECT
-      id,
-      client_name,
-      mailbox_email,
-      access_token,
-      refresh_token,
-      token_expiry,
-      scopes,
-      processed_label,
-      skipped_label,
-      active,
-      created_at,
-      updated_at
-    FROM gmail_mailboxes
-    WHERE active = 1
-    ORDER BY id ASC
+      m.id,
+      m.client_name,
+      m.client_workspace_id,
+      w.name AS client_workspace_name,
+      m.mailbox_email,
+      m.access_token,
+      m.refresh_token,
+      m.token_expiry,
+      m.scopes,
+      m.processed_label,
+      m.skipped_label,
+      m.active,
+      m.created_at,
+      m.updated_at
+    FROM gmail_mailboxes m
+    LEFT JOIN client_workspaces w ON w.id = m.client_workspace_id
+    WHERE m.active = 1
+    ORDER BY m.id ASC
     """
 
     try:
@@ -116,6 +123,8 @@ def load_active_gmail_mailboxes() -> list[GmailMailbox]:
             GmailMailbox(
                 id=int(row["id"]),
                 client_name=(row["client_name"] or "").strip(),
+                client_workspace_id=int(row["client_workspace_id"]) if row["client_workspace_id"] else None,
+                client_workspace_name=(row["client_workspace_name"] or "").strip() or None,
                 mailbox_email=(row["mailbox_email"] or "").strip().lower(),
                 access_token=(row["access_token"] or "").strip(),
                 refresh_token=(row["refresh_token"] or "").strip(),
@@ -138,16 +147,19 @@ def list_gmail_mailboxes(limit: int = 200) -> list[GmailMailboxRecord]:
 
     query = """
     SELECT
-      id,
-      client_name,
-      mailbox_email,
-      processed_label,
-      skipped_label,
-      active,
-      created_at,
-      updated_at
-    FROM gmail_mailboxes
-    ORDER BY updated_at DESC, id DESC
+      m.id,
+      m.client_name,
+      m.client_workspace_id,
+      w.name AS client_workspace_name,
+      m.mailbox_email,
+      m.processed_label,
+      m.skipped_label,
+      m.active,
+      m.created_at,
+      m.updated_at
+    FROM gmail_mailboxes m
+    LEFT JOIN client_workspaces w ON w.id = m.client_workspace_id
+    ORDER BY m.updated_at DESC, m.id DESC
     LIMIT ?
     """
 
@@ -164,6 +176,8 @@ def list_gmail_mailboxes(limit: int = 200) -> list[GmailMailboxRecord]:
             GmailMailboxRecord(
                 id=int(row["id"]),
                 client_name=(row["client_name"] or "").strip(),
+                client_workspace_id=int(row["client_workspace_id"]) if row["client_workspace_id"] else None,
+                client_workspace_name=(row["client_workspace_name"] or "").strip() or None,
                 mailbox_email=(row["mailbox_email"] or "").strip().lower(),
                 processed_label=(row["processed_label"] or DEFAULT_PROCESSED_LABEL).strip(),
                 skipped_label=(row["skipped_label"] or DEFAULT_SKIPPED_LABEL).strip(),
@@ -265,9 +279,22 @@ def _normalize_scopes_for_storage(scopes: list[str] | str | None) -> str:
     return json.dumps(cleaned, ensure_ascii=True)
 
 
+def _normalize_workspace_id(client_workspace_id: int | None) -> int | None:
+    if client_workspace_id is None:
+        return None
+    try:
+        value = int(client_workspace_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("client_workspace_id must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError("client_workspace_id must be a positive integer")
+    return value
+
+
 def upsert_gmail_mailbox_oauth(
     *,
     client_name: str,
+    client_workspace_id: int | None = None,
     mailbox_email: str,
     access_token: str,
     refresh_token: str | None,
@@ -282,6 +309,7 @@ def upsert_gmail_mailbox_oauth(
         raise ValueError("mailbox_email is required")
 
     normalized_client_name = (client_name or normalized_email).strip() or normalized_email
+    normalized_workspace_id = _normalize_workspace_id(client_workspace_id)
     normalized_access_token = (access_token or "").strip()
     if not normalized_access_token:
         raise ValueError("access_token is required")
@@ -296,6 +324,7 @@ def upsert_gmail_mailbox_oauth(
     INSERT INTO gmail_mailboxes
     (
       client_name,
+      client_workspace_id,
       mailbox_email,
       access_token,
       refresh_token,
@@ -307,9 +336,10 @@ def upsert_gmail_mailbox_oauth(
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(mailbox_email) DO UPDATE SET
       client_name = excluded.client_name,
+      client_workspace_id = COALESCE(excluded.client_workspace_id, gmail_mailboxes.client_workspace_id),
       access_token = excluded.access_token,
       refresh_token = COALESCE(excluded.refresh_token, gmail_mailboxes.refresh_token),
       token_expiry = excluded.token_expiry,
@@ -332,6 +362,7 @@ def upsert_gmail_mailbox_oauth(
                 insert_query,
                 (
                     normalized_client_name,
+                    normalized_workspace_id,
                     normalized_email,
                     normalized_access_token,
                     normalized_refresh_token,
@@ -346,7 +377,7 @@ def upsert_gmail_mailbox_oauth(
             )
 
             row = conn.execute(
-                "SELECT id, mailbox_email, active FROM gmail_mailboxes WHERE mailbox_email = ?",
+                "SELECT id, client_workspace_id, mailbox_email, active FROM gmail_mailboxes WHERE mailbox_email = ?",
                 (normalized_email,),
             ).fetchone()
             conn.commit()
@@ -356,6 +387,7 @@ def upsert_gmail_mailbox_oauth(
 
             return {
                 "id": int(row["id"]),
+                "client_workspace_id": int(row["client_workspace_id"]) if row["client_workspace_id"] else None,
                 "mailbox_email": (row["mailbox_email"] or "").strip().lower(),
                 "active": bool(row["active"]),
                 "created": created,

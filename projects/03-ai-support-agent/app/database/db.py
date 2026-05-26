@@ -21,6 +21,41 @@ DB_PATH = Path(
 SCHEMA_PATH = PROJECT_DIR / "app" / "database" / "schema.sql"
 
 
+def _column_exists(conn: sqlite3.Connection, *, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(str(row["name"]).strip().lower() == column.strip().lower() for row in rows)
+
+
+def _run_schema_migrations(conn: sqlite3.Connection) -> None:
+    # Legacy DBs may already have gmail_mailboxes without client_workspace_id.
+    if not _column_exists(conn, table="gmail_mailboxes", column="client_workspace_id"):
+        conn.execute("ALTER TABLE gmail_mailboxes ADD COLUMN client_workspace_id INTEGER")
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_gmail_mailboxes_workspace_id
+        ON gmail_mailboxes(client_workspace_id)
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS client_workspaces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            contact_email TEXT,
+            onboarding_token TEXT NOT NULL UNIQUE,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_client_workspaces_active ON client_workspaces(active)"
+    )
+
+
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=3, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -42,6 +77,7 @@ def init_db() -> None:
     schema = SCHEMA_PATH.read_text(encoding="utf-8")
     with get_conn() as conn:
         conn.executescript(schema)
+        _run_schema_migrations(conn)
         conn.commit()
 
 

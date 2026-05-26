@@ -37,9 +37,22 @@ CREATE TABLE IF NOT EXISTS api_key_usage_daily (
     UNIQUE(key_hash, day)
 );
 
+CREATE TABLE IF NOT EXISTS client_workspaces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    contact_email TEXT,
+    onboarding_token TEXT NOT NULL UNIQUE,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_workspaces_active ON client_workspaces(active);
+
 CREATE TABLE IF NOT EXISTS gmail_mailboxes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_name TEXT NOT NULL,
+    client_workspace_id INTEGER REFERENCES client_workspaces(id) ON DELETE SET NULL,
     mailbox_email TEXT NOT NULL,
     access_token TEXT,
     refresh_token TEXT,

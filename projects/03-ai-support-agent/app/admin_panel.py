@@ -11,6 +11,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.database.db import fetch_logs, fetch_recent_support_metrics, fetch_runtime_status
+from app.services.client_workspaces import (
+    ClientWorkspaceRecord,
+    create_client_workspace,
+    list_client_workspaces,
+)
 from app.services.mailboxes import (
     DEFAULT_PROCESSED_LABEL,
     DEFAULT_SKIPPED_LABEL,
@@ -26,6 +31,7 @@ ADMIN_COOKIE_NAME = "admin_api_key"
 ADMIN_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
 RECENT_LOG_WINDOW_HOURS = 24
 MAILBOX_LIST_LIMIT = 250
+WORKSPACE_LIST_LIMIT = 250
 ADMIN_LOGS_LIMIT_DEFAULT = 100
 WORKER_COMPONENT_NAME = "worker"
 WORKER_RUNNING_AFTER_SECONDS = 90
@@ -745,6 +751,23 @@ def _safe_client_name(client: dict[str, Any]) -> str:
     return str(client.get("name") or "unknown-client")
 
 
+def _build_mailboxes_notice_redirect(*, notice: str, is_error: bool = False) -> RedirectResponse:
+    payload: dict[str, str | int] = {"notice": notice}
+    if is_error:
+        payload["error"] = 1
+    return RedirectResponse(
+        url=f"/admin/mailboxes?{urlencode(payload)}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+def _build_onboarding_base_url(request: Request) -> str:
+    placeholder = "__WORKSPACE_TOKEN__"
+    return str(
+        request.url_for("connect_workspace_mailbox", onboarding_token=placeholder)
+    ).replace(placeholder, "")
+
+
 def require_admin_auth(
     request: Request,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
@@ -992,7 +1015,21 @@ def _render_dashboard_body(
 """
 
 
-def _render_mailboxes_body(mailboxes: list[GmailMailboxRecord], *, default_client_name: str) -> str:
+def _mailbox_workspace_name(mailbox: GmailMailboxRecord) -> str:
+    preferred = (mailbox.client_workspace_name or "").strip()
+    if preferred:
+        return preferred
+    fallback = (mailbox.client_name or "").strip()
+    return fallback or "-"
+
+
+def _render_mailboxes_body(
+    mailboxes: list[GmailMailboxRecord],
+    *,
+    workspaces: list[ClientWorkspaceRecord],
+    onboarding_base_url: str,
+    default_client_name: str,
+) -> str:
     rows: list[str] = []
     for mailbox in mailboxes:
         action_path = (
@@ -1006,7 +1043,7 @@ def _render_mailboxes_body(mailboxes: list[GmailMailboxRecord], *, default_clien
         rows.append(
             "<tr>"
             f"<td>{html.escape(mailbox.mailbox_email)}</td>"
-            f"<td>{html.escape(mailbox.client_name or '-')}</td>"
+            f"<td>{html.escape(_mailbox_workspace_name(mailbox))}</td>"
             f"<td>{_render_status_badge(mailbox.active)}</td>"
             f"<td><code>{html.escape(mailbox.processed_label)}</code></td>"
             f"<td><code>{html.escape(mailbox.skipped_label)}</code></td>"
@@ -1023,8 +1060,71 @@ def _render_mailboxes_body(mailboxes: list[GmailMailboxRecord], *, default_clien
     if not table_body:
         table_body = '<tr><td colspan="7"><div class="empty">No mailbox connections found yet.</div></td></tr>'
 
+    workspace_rows: list[str] = []
+    for workspace in workspaces:
+        onboarding_link = f"{onboarding_base_url}{workspace.onboarding_token}"
+        mailbox_summary = f"{workspace.mailbox_count} total / {workspace.active_mailbox_count} active"
+        workspace_rows.append(
+            "<tr>"
+            f"<td>{html.escape(workspace.name)}</td>"
+            f"<td>{html.escape(workspace.contact_email or '-')}</td>"
+            f"<td><a href=\"{html.escape(onboarding_link)}\" target=\"_blank\" rel=\"noopener noreferrer\">"
+            f"{html.escape(onboarding_link)}</a></td>"
+            f"<td>{html.escape(mailbox_summary)}</td>"
+            f"<td>{_render_status_badge(workspace.active)}</td>"
+            f"<td class=\"text-muted\">{html.escape(_format_timestamp(workspace.created_at))}</td>"
+            "</tr>"
+        )
+
+    workspace_table_body = "".join(workspace_rows)
+    if not workspace_table_body:
+        workspace_table_body = '<tr><td colspan="6"><div class="empty">No client workspaces yet. Create one to get an onboarding link.</div></td></tr>'
+
     return f"""
 <div class="stack">
+  <section class="card">
+    <div class="card-header">
+      <h2>Client Onboarding</h2>
+      <p>Create a lightweight client workspace and share its Gmail onboarding link.</p>
+    </div>
+    <div class="content">
+      <form method="post" action="/admin/workspaces/create">
+        <div class="form-grid">
+          <div class="input-group">
+            <label for="workspace-name">Workspace Name</label>
+            <input id="workspace-name" name="name" maxlength="200" required />
+          </div>
+          <div class="input-group">
+            <label for="workspace-contact-email">Contact Email (Optional)</label>
+            <input id="workspace-contact-email" name="contact_email" type="email" maxlength="200" />
+          </div>
+          <div class="input-group">
+            <label for="workspace-link-preview">Onboarding Route</label>
+            <input id="workspace-link-preview" value="{html.escape(onboarding_base_url)}{{token}}" readonly />
+          </div>
+        </div>
+        <button class="btn btn-primary btn-inline" type="submit">Create Workspace</button>
+      </form>
+    </div>
+    <div class="content table-wrap" style="padding-top:0;">
+      <table>
+        <thead>
+          <tr>
+            <th>Workspace</th>
+            <th>Contact Email</th>
+            <th>Onboarding Link</th>
+            <th>Mailboxes</th>
+            <th>Status</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {workspace_table_body}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="card">
     <div class="card-header">
       <h2>Connect Gmail</h2>
@@ -1063,7 +1163,7 @@ def _render_mailboxes_body(mailboxes: list[GmailMailboxRecord], *, default_clien
         <thead>
           <tr>
             <th>Mailbox Email</th>
-            <th>Client Name</th>
+            <th>Client/Workspace</th>
             <th>Status</th>
             <th>Processed Label</th>
             <th>Skipped Label</th>
@@ -1424,7 +1524,13 @@ def admin_mailboxes(
     client=Depends(require_admin_auth),
 ):
     mailboxes = list_gmail_mailboxes(limit=MAILBOX_LIST_LIMIT)
-    body_html = _render_mailboxes_body(mailboxes, default_client_name=_safe_client_name(client))
+    workspaces = list_client_workspaces(limit=WORKSPACE_LIST_LIMIT)
+    body_html = _render_mailboxes_body(
+        mailboxes,
+        workspaces=workspaces,
+        onboarding_base_url=_build_onboarding_base_url(request),
+        default_client_name=_safe_client_name(client),
+    )
 
     page = _render_layout(
         title="Admin Mailboxes",
@@ -1437,6 +1543,37 @@ def admin_mailboxes(
         notice_error=bool(error),
     )
     return HTMLResponse(page)
+
+
+@router.post("/workspaces/create")
+async def admin_create_workspace(request: Request, client=Depends(require_admin_auth)):
+    body_raw = await request.body()
+    form_data = parse_qs(body_raw.decode("utf-8"), keep_blank_values=True)
+
+    workspace_name = str((form_data.get("name") or [""])[0]).strip()
+    contact_email = str((form_data.get("contact_email") or [""])[0]).strip() or None
+
+    if not workspace_name:
+        return _build_mailboxes_notice_redirect(
+            notice="Workspace name is required.",
+            is_error=True,
+        )
+
+    try:
+        created = create_client_workspace(name=workspace_name, contact_email=contact_email, active=True)
+    except ValueError as exc:
+        return _build_mailboxes_notice_redirect(notice=str(exc), is_error=True)
+    except Exception as exc:
+        return _build_mailboxes_notice_redirect(
+            notice=f"Failed to create workspace: {exc}",
+            is_error=True,
+        )
+
+    onboarding_link = f"{_build_onboarding_base_url(request)}{created['onboarding_token']}"
+    return _build_mailboxes_notice_redirect(
+        notice=f"Workspace {created['name']} created. Onboarding link: {onboarding_link}",
+        is_error=False,
+    )
 
 
 @router.get("/logs", response_class=HTMLResponse)
