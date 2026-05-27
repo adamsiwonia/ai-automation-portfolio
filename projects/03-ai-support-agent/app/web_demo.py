@@ -1,5 +1,3 @@
-import os
-
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
@@ -527,6 +525,9 @@ HTML = """
         <label><b data-i18n="input.email_label">Customer email</b></label>
         <textarea id="email">Hi, I want to return my order. What's the process?</textarea>
 
+        <label><b data-i18n="input.api_key_label">Demo API key</b></label>
+        <input id="apiKey" type="password" autocomplete="off" spellcheck="false" />
+
         <div class="actions">
           <button class="btn-primary" id="btn" data-i18n="input.generate_btn">Generate reply</button>
           <button class="btn-ghost" id="btnFill" data-i18n="input.sample_btn">Use sample email</button>
@@ -645,6 +646,7 @@ HTML = """
   const langPlBtn = document.getElementById("langPl");
   const liveBadge = document.getElementById("liveBadge");
   const emailEl = document.getElementById("email");
+  const apiKeyEl = document.getElementById("apiKey");
   const scenarioButtons = document.querySelectorAll(".scenario-btn");
 
   const statusEl = document.getElementById("status");
@@ -694,6 +696,7 @@ HTML = """
           product_question: "Product question",
         },
         email_label: "Customer email",
+        api_key_label: "Demo API key",
         generate_btn: "Generate reply",
         sample_btn: "Use sample email",
         tip: "Tip: For a client-facing demo, show only the suggested reply + next step (no JSON).",
@@ -800,6 +803,7 @@ Eva`,
           product_question: "Pytanie o produkt",
         },
         email_label: "E-mail klienta",
+        api_key_label: "Klucz API demo",
         generate_btn: "Generuj odpowiedź",
         sample_btn: "Użyj przykładu",
         tip: "W wersji demo pokazujemy głównie sugerowaną odpowiedź i kolejny krok (bez JSON).",
@@ -1047,8 +1051,14 @@ Kasia`,
   });
 
   btn.addEventListener("click", async () => {
-    const key = "__CLIENT_API_KEY__";
+    const key = apiKeyEl.value.trim();
     const email = emailEl.value;
+
+    if (!key) {
+      setError("Missing demo API key.");
+      setStatus("");
+      return;
+    }
 
     setStatus(translate("status.generating"));
     replyEl.textContent = translate("status.loading");
@@ -1063,7 +1073,7 @@ Kasia`,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(key ? {"X-API-Key": key} : {})
+          "X-API-Key": key
         },
         body: JSON.stringify({ email, source: "web-demo" })
       });
@@ -1115,5 +1125,4 @@ Kasia`,
 
 @router.get("/demo", response_class=HTMLResponse, include_in_schema=False)
 def demo_page():
-    client_key = os.getenv("DEMO_API_KEY") or os.getenv("API_KEY") or ""
-    return HTMLResponse(HTML.replace("__CLIENT_API_KEY__", client_key))
+    return HTMLResponse(HTML)

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict
 from openai import OpenAI
 
 from app.core.config import Settings
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM = """You are a professional e-commerce customer support agent.
 
@@ -73,8 +76,13 @@ class LLMService:
         tmpl = prompt_template or DEFAULT_PROMPT_TEMPLATE
         prompt = tmpl.replace("{{EMAIL}}", email)
 
-        print("OPENAI MODEL:", self.model)
-        print("PROMPT SENT TO MODEL:", prompt)
+        logger.info(
+            "LLM request started | model=%s | email_chars=%s | max_tokens=%s | temperature=%s",
+            self.model,
+            len(email or ""),
+            max_tokens,
+            temperature,
+        )
 
         resp = self.client.responses.create(
             model=self.model,
@@ -89,8 +97,11 @@ class LLMService:
         raw_text = resp.output_text or ""
         clean = strip_code_fences(raw_text)
 
-        print("RAW MODEL TEXT:", raw_text)
-        print("CLEAN MODEL TEXT:", clean)
+        logger.info(
+            "LLM response received | model=%s | output_chars=%s",
+            self.model,
+            len(raw_text),
+        )
 
         parsed = json.loads(clean)
 
