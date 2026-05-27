@@ -23,12 +23,25 @@ def _extract_api_key(x_api_key: str | None, authorization: str | None) -> str | 
     return None
 
 
+def _api_key_source(x_api_key: str | None, authorization: str | None) -> str:
+    if x_api_key and x_api_key.strip():
+        return "x-api-key"
+
+    if authorization and authorization.strip():
+        parts = authorization.strip().split()
+        if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
+            return "authorization-bearer"
+        return "authorization-unsupported"
+
+    return "missing"
+
+
 def _auth_via_demo_key(api_key: str, request: Request) -> dict[str, Any] | None:
     """Stateless fallback for demo/local mode via env keys."""
     demo_key = (os.getenv("DEMO_API_KEY") or "").strip() or None
     legacy_key = (os.getenv("API_KEY") or "").strip() or None
-    print("DEBUG auth -> DEMO_API_KEY loaded:", bool(demo_key))
-    print("DEBUG auth -> API_KEY loaded:", bool(legacy_key))
+    print("DEBUG auth -> DEMO_API_KEY configured:", bool(demo_key))
+    print("DEBUG auth -> API_KEY configured:", bool(legacy_key))
 
     if demo_key and api_key == demo_key:
         print("DEBUG auth -> DEMO fallback matched")
@@ -52,11 +65,12 @@ def require_api_key(
 ):
     api_key = _extract_api_key(x_api_key, authorization)
 
+    print("DEBUG auth -> api_key source:", _api_key_source(x_api_key, authorization))
     print("DEBUG auth -> extracted api_key present:", bool(api_key))
-    print("DEBUG auth -> extracted api_key value:", api_key)
-    print("DEBUG auth -> API_KEY_HMAC_SECRET loaded:", bool(os.getenv("API_KEY_HMAC_SECRET")))
-    print("DEBUG auth -> DEMO_API_KEY loaded:", bool(os.getenv("DEMO_API_KEY")))
-    print("DEBUG auth -> API_KEY loaded:", bool(os.getenv("API_KEY")))
+    print("DEBUG auth -> extracted api_key length:", len(api_key or ""))
+    print("DEBUG auth -> API_KEY_HMAC_SECRET configured:", bool(os.getenv("API_KEY_HMAC_SECRET")))
+    print("DEBUG auth -> DEMO_API_KEY configured:", bool(os.getenv("DEMO_API_KEY")))
+    print("DEBUG auth -> API_KEY configured:", bool(os.getenv("API_KEY")))
 
     if not api_key:
         print("DEBUG auth -> missing API key")
@@ -67,7 +81,8 @@ def require_api_key(
     if secret:
         try:
             key_hash = hash_api_key(api_key, secret)
-            print("DEBUG auth -> computed key_hash:", key_hash)
+            print("DEBUG auth -> computed key_hash present:", bool(key_hash))
+            print("DEBUG auth -> computed key_hash length:", len(key_hash))
 
             row = db.execute(
                 "SELECT key_hash, name, is_active, daily_limit FROM api_keys WHERE key_hash = ?",
