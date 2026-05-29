@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/_tmp/
+.venv/
+.env
+server.out.log
+server.err.log
+data/*.sqlite
+data/*.sqlite-*
+!data/.gitkeep
+exports/*.csv
+!exports/.gitkeep

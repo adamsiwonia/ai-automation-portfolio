@@ -1,0 +1,17 @@
+server:
+  host: "127.0.0.1"
+  port: 8765
+
+ollama:
+  base_url: "http://127.0.0.1:11434"
+  default_model: "qwen3:8b"
+
+lead_source_mode: "mock"
+
+qualification:
+  minimum_score: 7
+
+google_sheets:
+  spreadsheet_id: "YOUR_SPREADSHEET_ID"
+  worksheet_name: "Leads"
+  write_enabled: false

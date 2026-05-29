@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Agent Office</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="top-nav" aria-label="Project 05 navigation">
+        <button class="tab-button active" data-tab-target="tab-dashboard" aria-controls="tab-dashboard" aria-selected="true" type="button">Home / Dashboard</button>
+        <button class="tab-button" data-tab-target="tab-lead-control" aria-controls="tab-lead-control" aria-selected="false" type="button">Lead Control</button>
+        <button class="tab-button" data-tab-target="tab-logs" aria-controls="tab-logs" aria-selected="false" type="button">Logs</button>
+      </nav>
+
+      <section id="tab-dashboard" class="tab-panel active" data-tab-panel="tab-dashboard">
+        <section class="hero">
+          <div>
+            <p class="eyebrow">Local AI Agent Office</p>
+            <h1>Lead discovery, qualification, and prep. No email sending.</h1>
+            <p class="hero-copy">
+              A small local control panel for finding leads, pre-filtering them, qualifying them
+              with Ollama, and approving or rejecting them from the Project 05 SQLite database.
+            </p>
+          </div>
+          <div class="mode-card">
+            <span class="label">Current mode</span>
+            <strong id="mode">STOPPED</strong>
+            <small id="task">Idle</small>
+            <div class="mini-meta">
+              <span>Source: <b id="sourceMode">mock</b></span>
+              <span>Min score: <b id="minimumScore">7</b></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel controls">
+          <label>
+            <span>Niche / search query</span>
+            <input id="niche" type="text" value="local accountants needing workflow automation" />
+          </label>
+          <label>
+            <span>Limit</span>
+            <input id="limit" type="number" min="1" max="50" value="5" />
+          </label>
+          <label>
+            <span>Ollama model</span>
+            <input id="modelName" type="text" value="qwen3:8b" />
+          </label>
+          <div class="button-row">
+            <button id="startBtn" class="primary">Start Agents</button>
+            <button id="stopBtn">Stop Agents</button>
+            <button id="runOnceBtn">Run Once</button>
+            <button id="refreshBtn">Refresh Status</button>
+          </div>
+        </section>
+
+        <section class="counts" aria-label="Lead counts">
+          <article><span>Discovered</span><strong id="countDiscovered">0</strong></article>
+          <article><span>Qualified</span><strong id="countQualified">0</strong></article>
+          <article><span>Review</span><strong id="countReview">0</strong></article>
+          <article><span>Rejected</span><strong id="countRejected">0</strong></article>
+          <article><span>Duplicates</span><strong id="countDuplicates">0</strong></article>
+          <article><span>Errors</span><strong id="countErrors">0</strong></article>
+        </section>
+
+        <article class="panel">
+          <div class="section-heading">
+            <h2>Recent Logs</h2>
+            <span>Latest 30</span>
+          </div>
+          <div class="table-wrap">
+            <table class="logs-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Level</th>
+                  <th>Event</th>
+                  <th>Message</th>
+                  <th>Lead / Company</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardLogs"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="tab-lead-control" class="tab-panel" data-tab-panel="tab-lead-control" hidden>
+        <article class="panel leads-panel">
+          <div class="section-heading">
+            <h2>Lead Control</h2>
+            <span>SQLite source of truth</span>
+          </div>
+          <div class="table-wrap">
+            <table class="lead-control-table">
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Domain</th>
+                  <th>Email</th>
+                  <th>Niche</th>
+                  <th>Score</th>
+                  <th>Status</th>
+                  <th>Reason / Recommended Angle</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="leads"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="tab-logs" class="tab-panel" data-tab-panel="tab-logs" hidden>
+        <article class="panel">
+          <div class="section-heading">
+            <h2>Logs</h2>
+            <span>Full log table</span>
+          </div>
+          <div class="table-wrap">
+            <table class="logs-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Level</th>
+                  <th>Event</th>
+                  <th>Message</th>
+                  <th>Lead / Company</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="logs"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <aside id="debugPanel" class="debug-panel" aria-live="polite">
+        <strong>UI Debug</strong>
+        <pre id="debugOutput">JavaScript not initialized yet.</pre>
+      </aside>
+    </main>
+    <script src="/static/app.js?v=20260529-tabs-debug"></script>
+  </body>
+</html>
