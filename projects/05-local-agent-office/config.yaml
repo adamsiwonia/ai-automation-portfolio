@@ -8,6 +8,12 @@ ollama:
 
 lead_source_mode: "mock"
 
+search:
+  provider: "seed_urls"
+  location: "Inverness, Scotland"
+  max_results: 10
+  seed_urls_path: "data/search_seed_urls.txt"
+
 qualification:
   minimum_score: 7
 

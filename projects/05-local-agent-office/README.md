@@ -15,6 +15,7 @@ Project 05 does not read, inspect, migrate, or write the Project 03.5 SQLite dat
 - Serves a local control panel at `http://127.0.0.1:8765`
 - Discovers structured lead candidates in `mock`, `manual`, or `search` mode
 - Clearly labels mock results as `MOCK` and blocks them from real outreach by default
+- Uses a `LeadDiscoveryAgent` with provider tools for real discovery paths
 - Applies a strict pre-filter before calling Ollama
 - Qualifies only plausible leads through the local Ollama API
 - Imports real manually researched leads from CSV as review-ready records
@@ -219,13 +220,66 @@ ollama:
 
 ## Configure Lead Source Mode
 
-`lead_source_mode` controls where candidates come from:
+`lead_source_mode` controls the broad workflow path:
 
 - `mock`: deterministic local mock leads, clearly marked as `MOCK`
 - `manual`: reserved for a manual/imported lead input path
-- `search`: reserved for a future real search adapter
+- `search`: uses `LeadDiscoveryAgent` and the configured search provider
 
 Important: `mock` mode is for testing the workflow only. Mock leads cannot be approved for outreach in the UI/API and cannot be exported to the Project 03.5 CSV unless you explicitly pass the testing-only `--include-mock` flag.
+
+## Real Lead Discovery Agent
+
+Project 05 has a minimal provider architecture for discovery:
+
+- `LeadDiscoveryAgent` orchestrates discovery providers
+- `SearchProvider.search(query, limit)` is the provider interface
+- `LeadCandidate` is the shared candidate object providers return
+- provider factory names are `mock`, `seed_urls`, `brave`, and `google_places`
+
+Provider status:
+
+- `seed_urls`: free/local provider; reads real URLs from `data/search_seed_urls.txt` and fetches page content
+- `mock`: testing-only provider; used only by `lead_source_mode: "mock"`
+- `brave`: planned provider scaffold; requires `BRAVE_SEARCH_API_KEY`; no real API call is made yet
+- `google_places`: planned provider scaffold; requires `GOOGLE_PLACES_API_KEY`; no real API call is made yet
+
+To use the first real discovery tool:
+
+1. Add one real business website URL per line to `data/search_seed_urls.txt`.
+2. Set `lead_source_mode: "search"` in `config.yaml` or `LEAD_SOURCE_MODE=search` in `.env`.
+3. Keep `search.provider: "seed_urls"` unless you are developing a future provider.
+4. Run the app and click **Run Once**.
+
+Search mode fetches each seed URL and extracts only observed data:
+
+- company from page title, site name, or domain
+- domain from the URL
+- email only if visibly present in page text
+- website URL from the seed URL
+- `source = SEARCH`
+- `lead_source_mode = search`
+
+Search mode does not use mock templates. If `data/search_seed_urls.txt` has no usable URLs, Project 05 fails clearly instead of fabricating leads.
+
+Default search config:
+
+```yaml
+search:
+  provider: "seed_urls"
+  location: "Inverness, Scotland"
+  max_results: 10
+  seed_urls_path: "data/search_seed_urls.txt"
+```
+
+Environment variables for planned API providers:
+
+```text
+BRAVE_SEARCH_API_KEY=
+GOOGLE_PLACES_API_KEY=
+```
+
+Do not scrape the Google Search or Google Maps browser UI. If Google Maps/Places discovery is added later, use an approved API/provider path with explicit credentials and rate limits.
 
 Default:
 
@@ -380,4 +434,4 @@ Tests cover:
 
 - No LangChain, CrewAI, AutoGen, Docker, Celery, Redis, Kubernetes, or frontend framework.
 - The current lead finder defaults to mock mode on purpose so the MVP remains debuggable.
-- Real search can replace `agents/lead_finder.py` later without changing the rest of the workflow.
+- The first real discovery path uses seed URLs; richer providers can be added later without changing the rest of the workflow.

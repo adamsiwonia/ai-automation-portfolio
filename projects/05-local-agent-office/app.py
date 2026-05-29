@@ -103,10 +103,10 @@ def run_lead_workflow(
             event="lead_discovery_completed",
             details={"lead_source_mode": source_mode, "candidate_count": len(candidates)},
         )
-        if not candidates and source_mode in {"manual", "search"}:
+        if not candidates and source_mode == "manual":
             database.add_log(
                 "WARNING",
-                f"{source_mode.upper()} lead source mode is configured, but no importer/search adapter is active yet.",
+                f"{source_mode.upper()} lead source mode is configured, but no importer is active in the run workflow.",
                 task="lead_finder",
                 event="lead_source_not_implemented",
                 details={"lead_source_mode": source_mode},

@@ -13,11 +13,6 @@ def research_lead(lead: dict) -> dict:
     researched = dict(lead)
     domain = normalize_domain(researched.get("website_url"))
     researched["normalized_domain"] = domain
-
-    if not researched.get("contact_email") and domain:
-        researched["contact_email"] = f"hello@{domain}"
-    else:
-        researched["contact_email"] = normalize_email(researched.get("contact_email"))
+    researched["contact_email"] = normalize_email(researched.get("contact_email"))
 
     return researched
-

@@ -4,6 +4,7 @@ __pycache__/
 tests/_tmp/
 .venv/
 .env
+!.env.example
 server.out.log
 server.err.log
 data/*.sqlite

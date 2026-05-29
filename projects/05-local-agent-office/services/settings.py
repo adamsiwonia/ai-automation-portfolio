@@ -41,3 +41,23 @@ def minimum_qualification_score() -> int:
         score = 7
     return max(1, min(score, 10))
 
+
+def search_settings() -> dict[str, Any]:
+    load_dotenv(BASE_DIR / ".env")
+    config = load_config().get("search", {}) or {}
+    provider = os.getenv("SEARCH_PROVIDER") or config.get("provider", "seed_urls")
+    location = os.getenv("SEARCH_LOCATION") or config.get("location", "")
+    max_results = os.getenv("SEARCH_MAX_RESULTS") or config.get("max_results", 10)
+    seed_urls_path = os.getenv("SEARCH_SEED_URLS_PATH") or config.get("seed_urls_path", "data/search_seed_urls.txt")
+
+    try:
+        parsed_max_results = int(max_results)
+    except (TypeError, ValueError):
+        parsed_max_results = 10
+
+    return {
+        "provider": str(provider).strip().lower(),
+        "location": str(location).strip(),
+        "max_results": max(1, min(parsed_max_results, 50)),
+        "seed_urls_path": str(seed_urls_path).strip(),
+    }

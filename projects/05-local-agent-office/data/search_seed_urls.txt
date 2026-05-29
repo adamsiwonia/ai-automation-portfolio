@@ -1,0 +1,3 @@
+# Add one real business website URL per line when using lead_source_mode: "search".
+# Project 05 will fetch these pages and extract observed company/domain/email data.
+# Blank lines and lines starting with # are ignored.
